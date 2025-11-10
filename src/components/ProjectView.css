@@ -1,0 +1,73 @@
+.project-view {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 30px;
+  background-color: white;
+  border-bottom: 1px solid #ddd;
+}
+
+.project-header h2 {
+  font-size: 24px;
+  color: #333;
+}
+
+.project-header button {
+  padding: 10px 20px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.project-header button:first-child {
+  background-color: #6c757d;
+}
+
+.project-header button:hover {
+  opacity: 0.9;
+}
+
+.add-topic-form {
+  display: flex;
+  gap: 10px;
+  padding: 15px 30px;
+  background-color: white;
+  border-bottom: 1px solid #ddd;
+}
+
+.add-topic-form input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.add-topic-form button {
+  padding: 8px 16px;
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.add-topic-form button:last-child {
+  background-color: #6c757d;
+}
+
+.canvas {
+  flex: 1;
+  position: relative;
+  background-color: #e8e8e8;
+  overflow: auto;
+}
