@@ -21,6 +21,14 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
   const [isAddingTopic, setIsAddingTopic] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Multi-selection state
+  const [selectedTopics, setSelectedTopics] = useState(new Set());
+
+  // Rectangle selection state
+  const [isRectSelecting, setIsRectSelecting] = useState(false);
+  const [rectStart, setRectStart] = useState({ x: 0, y: 0 });
+  const [rectEnd, setRectEnd] = useState({ x: 0, y: 0 });
+
   // Connection state
   const [connections, setConnections] = useState([]);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -75,6 +83,21 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isConnecting, showConnectionModal]);
+
+  useEffect(() => {
+    // Clear selection when CTRL is released (but not when rectangle selecting)
+    const handleKeyUp = (e) => {
+      if ((e.key === 'Control' || e.key === 'Meta') && !isRectSelecting) {
+        clearSelection();
+      }
+    };
+
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isRectSelecting]);
 
   const loadTopics = async () => {
     try {
@@ -256,22 +279,113 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
     setArrowUpdateTrigger(prev => prev + 1);
   };
 
+  // Multi-selection handlers
+  const handleTopicSelect = (topicId, isCtrlPressed) => {
+    if (isCtrlPressed) {
+      setSelectedTopics(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(topicId)) {
+          newSet.delete(topicId);
+        } else {
+          newSet.add(topicId);
+        }
+        return newSet;
+      });
+    } else {
+      // Single selection - clear others
+      setSelectedTopics(new Set([topicId]));
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedTopics(new Set());
+  };
+
+  // Rectangle selection handlers
+  const handleCanvasMouseDown = (e) => {
+    // Only start rectangle selection if clicking on canvas background
+    if (e.target.classList.contains('canvas')) {
+      const workspaceRect = workspaceRef.current.getBoundingClientRect();
+      const startX = e.clientX - workspaceRect.left;
+      const startY = e.clientY - workspaceRect.top;
+
+      setIsRectSelecting(true);
+      setRectStart({ x: startX, y: startY });
+      setRectEnd({ x: startX, y: startY });
+      clearSelection(); // Clear existing selection when starting new rectangle selection
+    }
+  };
+
+  const handleCanvasMouseMove = (e) => {
+    if (isRectSelecting) {
+      const workspaceRect = workspaceRef.current.getBoundingClientRect();
+      const currentX = e.clientX - workspaceRect.left;
+      const currentY = e.clientY - workspaceRect.top;
+
+      setRectEnd({ x: currentX, y: currentY });
+    }
+  };
+
+  const handleCanvasMouseUp = (e) => {
+    if (isRectSelecting) {
+      // Calculate selection rectangle bounds
+      const minX = Math.min(rectStart.x, rectEnd.x);
+      const maxX = Math.max(rectStart.x, rectEnd.x);
+      const minY = Math.min(rectStart.y, rectEnd.y);
+      const maxY = Math.max(rectStart.y, rectEnd.y);
+
+      // Find all topics that intersect with the selection rectangle
+      const selectedIds = new Set();
+      topics.forEach(topic => {
+        const topicElement = document.querySelector(`[data-topic-id="${topic.id}"]`);
+        if (topicElement) {
+          const topicRect = topicElement.getBoundingClientRect();
+          const workspaceRect = workspaceRef.current.getBoundingClientRect();
+
+          const topicLeft = topicRect.left - workspaceRect.left;
+          const topicTop = topicRect.top - workspaceRect.top;
+          const topicRight = topicLeft + topicRect.width;
+          const topicBottom = topicTop + topicRect.height;
+
+          // Check if rectangles intersect
+          if (!(topicRight < minX || topicLeft > maxX || topicBottom < minY || topicTop > maxY)) {
+            selectedIds.add(topic.id);
+          }
+        }
+      });
+
+      setSelectedTopics(selectedIds);
+      setIsRectSelecting(false);
+    }
+  };
+
   // Get reference node positions for rendering arrows
   const getReferencePositions = () => {
+    const GRID_CELL_SIZE = 40;
     const positions = {};
+
     topics.forEach(topic => {
       if (topic.references) {
+        const gridWidth = topic.grid_width || 5;
+        const topicPixelWidth = gridWidth * GRID_CELL_SIZE;
+        const padding = 30; // 15px left + 15px right
+        const availableWidth = topicPixelWidth - padding;
+        const refsPerRow = Math.floor(availableWidth / 40); // 30px circle + 10px gap = 40px per ref
+
         topic.references.forEach((ref, index) => {
-          // Calculate position based on topic position and reference index
           const topicElement = document.querySelector(`[data-topic-id="${topic.id}"]`);
           if (topicElement) {
             const topicRect = topicElement.getBoundingClientRect();
             const workspaceRect = workspaceRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
 
-            // Position below topic header, in a row
+            // Calculate row and column
+            const row = Math.floor(index / refsPerRow);
+            const col = index % refsPerRow;
+
+            // Position with multi-row support
             positions[ref.id] = {
-              x: topicRect.left - workspaceRect.left + 30 + (index * 40),
-              y: topicRect.top - workspaceRect.top + 80
+              x: topicRect.left - workspaceRect.left + 15 + (col * 40) + 15, // +15 for circle center
+              y: topicRect.top - workspaceRect.top + 70 + (row * 40) + 15 // 70 = header height, +15 for circle center
             };
           }
         });
@@ -332,7 +446,13 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
         </div>
       )}
 
-      <div className="canvas" ref={workspaceRef}>
+      <div
+        className="canvas"
+        ref={workspaceRef}
+        onMouseDown={handleCanvasMouseDown}
+        onMouseMove={handleCanvasMouseMove}
+        onMouseUp={handleCanvasMouseUp}
+      >
         {/* SVG layer for arrows */}
         <svg className="connections-layer">
           <defs>
@@ -452,8 +572,25 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
             onConnectionEnd={handleConnectionEnd}
             isConnecting={isConnecting}
             onPositionChange={handleTopicPositionChange}
+            isSelected={selectedTopics.has(topic.id)}
+            onSelect={handleTopicSelect}
+            selectedTopics={selectedTopics}
+            allTopics={topics}
           />
         ))}
+
+        {/* Rectangle selection overlay */}
+        {isRectSelecting && (
+          <div
+            className="selection-rectangle"
+            style={{
+              left: `${Math.min(rectStart.x, rectEnd.x)}px`,
+              top: `${Math.min(rectStart.y, rectEnd.y)}px`,
+              width: `${Math.abs(rectEnd.x - rectStart.x)}px`,
+              height: `${Math.abs(rectEnd.y - rectStart.y)}px`,
+            }}
+          />
+        )}
       </div>
 
       {showConnectionModal && (

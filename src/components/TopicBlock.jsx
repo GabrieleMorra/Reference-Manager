@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom';
 import ReferenceNode from './ReferenceNode';
 import './TopicBlock.css';
 
-function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnectionStart, onConnectionEnd, isConnecting, onPositionChange }) {
+function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnectionStart, onConnectionEnd, isConnecting, onPositionChange, isSelected, onSelect, selectedTopics, allTopics }) {
+  const GRID_CELL_SIZE = 40; // px per grid cell
+
   const [references, setReferences] = useState([]);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isAddingReference, setIsAddingReference] = useState(false);
@@ -11,8 +13,14 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameName, setRenameName] = useState(topic.name);
   const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
   const [position, setPosition] = useState({ x: topic.position_x, y: topic.position_y });
-  const dragRef = useRef({ startX: 0, startY: 0, offsetX: 0, offsetY: 0 });
+  const [gridSize, setGridSize] = useState({
+    width: topic.grid_width || 5,
+    height: topic.grid_height || 3
+  });
+  const dragRef = useRef({ startX: 0, startY: 0, offsetX: 0, offsetY: 0, groupOffsets: [], isCtrlPressed: false });
+  const resizeRef = useRef({ startX: 0, startY: 0, startWidth: 0, startHeight: 0, direction: '' });
   const blockRef = useRef(null);
 
   useEffect(() => {
@@ -124,12 +132,34 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
       return;
     }
 
+    // Prepare for dragging
     setIsDragging(true);
+
+    // Save CTRL state for later
+    const isCtrlPressed = e.ctrlKey || e.metaKey;
+
+    // Calculate offsets for all selected topics (for group drag)
+    const groupOffsets = [];
+    if (selectedTopics && allTopics) {
+      selectedTopics.forEach(selectedId => {
+        const selectedTopic = allTopics.find(t => t.id === selectedId);
+        if (selectedTopic) {
+          groupOffsets.push({
+            id: selectedId,
+            offsetX: selectedTopic.position_x,
+            offsetY: selectedTopic.position_y,
+          });
+        }
+      });
+    }
+
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
       offsetX: position.x,
       offsetY: position.y,
+      groupOffsets: groupOffsets,
+      isCtrlPressed: isCtrlPressed,
     };
   };
 
@@ -141,6 +171,10 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
 
     let newX = dragRef.current.offsetX + deltaX;
     let newY = dragRef.current.offsetY + deltaY;
+
+    // SNAP TO GRID
+    newX = Math.round(newX / GRID_CELL_SIZE) * GRID_CELL_SIZE;
+    newY = Math.round(newY / GRID_CELL_SIZE) * GRID_CELL_SIZE;
 
     // Get canvas bounds
     const canvas = blockRef.current?.parentElement;
@@ -155,10 +189,14 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
       newX = Math.max(margin, Math.min(newX, canvasRect.width - blockRect.width - margin));
       newY = Math.max(margin, Math.min(newY, canvasRect.height - blockRect.height - margin));
 
-      // Check collision with other topics
+      // Check collision with other topics (excluding selected ones in group drag)
       const allTopics = canvas.querySelectorAll('.topic-block');
       allTopics.forEach((otherBlock) => {
         if (otherBlock === block) return;
+
+        // Skip collision check with other selected blocks during group drag
+        const otherTopicId = parseInt(otherBlock.getAttribute('data-topic-id'));
+        if (selectedTopics && selectedTopics.has(otherTopicId)) return;
 
         const otherRect = otherBlock.getBoundingClientRect();
         const canvasOffset = canvas.getBoundingClientRect();
@@ -205,6 +243,28 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
     }
 
     setPosition({ x: newX, y: newY });
+
+    // Move other selected topics in the group
+    if (selectedTopics && selectedTopics.size > 1 && dragRef.current.groupOffsets.length > 0) {
+      // Calculate actual delta AFTER snap-to-grid
+      const actualDeltaX = newX - dragRef.current.offsetX;
+      const actualDeltaY = newY - dragRef.current.offsetY;
+
+      dragRef.current.groupOffsets.forEach(({ id, offsetX, offsetY }) => {
+        if (id === topic.id) return; // Skip current topic (already moved above)
+
+        const otherBlock = document.querySelector(`[data-topic-id="${id}"]`);
+        if (otherBlock) {
+          // Apply the same delta to preserve relative positions
+          let otherNewX = offsetX + actualDeltaX;
+          let otherNewY = offsetY + actualDeltaY;
+
+          // Apply position (already snapped via delta from snapped main block)
+          otherBlock.style.left = `${otherNewX}px`;
+          otherBlock.style.top = `${otherNewY}px`;
+        }
+      });
+    }
   };
 
   const handleMouseUp = async () => {
@@ -212,7 +272,22 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
 
     setIsDragging(false);
 
-    // Save new position to backend
+    // Check if there was actual movement
+    const hasMoved = position.x !== dragRef.current.offsetX || position.y !== dragRef.current.offsetY;
+
+    if (!hasMoved) {
+      // No movement - this was a click, handle selection with CTRL
+      const isCtrlPressed = dragRef.current.isCtrlPressed;
+
+      if (isCtrlPressed && onSelect) {
+        // Toggle selection only with CTRL
+        onSelect(topic.id, true);
+      }
+      // Without CTRL, don't change selection (no single selection allowed)
+      return;
+    }
+
+    // Save new position to backend for current topic
     try {
       await fetch(`http://localhost:5000/api/topics/${topic.id}/position`, {
         method: 'PUT',
@@ -221,6 +296,172 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
       });
     } catch (error) {
       console.error('Failed to update topic position:', error);
+    }
+
+    // Save positions for other selected topics in the group
+    if (selectedTopics && selectedTopics.size > 1 && dragRef.current.groupOffsets.length > 0) {
+      const deltaX = position.x - dragRef.current.offsetX;
+      const deltaY = position.y - dragRef.current.offsetY;
+
+      for (const { id, offsetX, offsetY } of dragRef.current.groupOffsets) {
+        if (id === topic.id) continue; // Skip current topic (already saved above)
+
+        let otherNewX = offsetX + deltaX;
+        let otherNewY = offsetY + deltaY;
+
+        // SNAP TO GRID
+        otherNewX = Math.round(otherNewX / GRID_CELL_SIZE) * GRID_CELL_SIZE;
+        otherNewY = Math.round(otherNewY / GRID_CELL_SIZE) * GRID_CELL_SIZE;
+
+        try {
+          await fetch(`http://localhost:5000/api/topics/${id}/position`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ position_x: otherNewX, position_y: otherNewY }),
+          });
+        } catch (error) {
+          console.error(`Failed to update position for topic ${id}:`, error);
+        }
+      }
+
+      // Just trigger arrow update without full refresh
+      if (onPositionChange) {
+        onPositionChange();
+      }
+    }
+  };
+
+  // Resize handlers
+  const handleResizeStart = (e, direction) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    setIsResizing(true);
+    resizeRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startWidth: gridSize.width,
+      startHeight: gridSize.height,
+      direction: direction
+    };
+  };
+
+  const handleResizeMove = (e) => {
+    if (!isResizing) return;
+
+    const deltaX = e.clientX - resizeRef.current.startX;
+    const deltaY = e.clientY - resizeRef.current.startY;
+    const direction = resizeRef.current.direction;
+
+    // Calculate delta in grid cells
+    const deltaGridX = Math.round(deltaX / GRID_CELL_SIZE);
+    const deltaGridY = Math.round(deltaY / GRID_CELL_SIZE);
+
+    let newWidth = resizeRef.current.startWidth;
+    let newHeight = resizeRef.current.startHeight;
+
+    // Apply deltas based on direction
+    if (direction.includes('e')) {
+      newWidth = resizeRef.current.startWidth + deltaGridX;
+    }
+    if (direction.includes('w')) {
+      newWidth = resizeRef.current.startWidth - deltaGridX;
+    }
+    if (direction.includes('s')) {
+      newHeight = resizeRef.current.startHeight + deltaGridY;
+    }
+    if (direction.includes('n')) {
+      newHeight = resizeRef.current.startHeight - deltaGridY;
+    }
+
+    // Enforce minimum width (5 grid cells)
+    newWidth = Math.max(5, newWidth);
+
+    // Calculate dynamic minimum height based on references
+    const topicPixelWidth = newWidth * GRID_CELL_SIZE;
+    const padding = 30; // 15px left + 15px right
+    const availableWidth = topicPixelWidth - padding;
+    const refsPerRow = Math.floor(availableWidth / 40); // 30px circle + 10px gap = 40px per ref
+    const numReferences = references.length;
+    const numRows = refsPerRow > 0 ? Math.ceil(numReferences / refsPerRow) : 0;
+
+    // Only apply dynamic height when references span multiple rows
+    let minHeightCells = 3; // Default minimum
+    if (numRows > 1) {
+      // Calculate minimum height needed: header (70px) + rows of references (40px each) + padding (20px)
+      // Convert to grid cells (divide by GRID_CELL_SIZE and round up)
+      const minHeightPixels = 70 + (numRows * 40) + 20;
+      minHeightCells = Math.max(3, Math.ceil(minHeightPixels / GRID_CELL_SIZE));
+    }
+
+    // Enforce minimum height
+    newHeight = Math.max(minHeightCells, newHeight);
+
+    // Check collision with other topics
+    const canvas = blockRef.current?.parentElement;
+    const block = blockRef.current;
+    if (canvas && block) {
+      const newPixelWidth = newWidth * GRID_CELL_SIZE;
+      const newPixelHeight = newHeight * GRID_CELL_SIZE;
+      const canvasRect = canvas.getBoundingClientRect();
+      const blockRect = block.getBoundingClientRect();
+
+      // Check collision with other topic blocks
+      const allTopics = canvas.querySelectorAll('.topic-block');
+      let collision = false;
+
+      allTopics.forEach((otherBlock) => {
+        if (otherBlock === block) return;
+
+        const otherRect = otherBlock.getBoundingClientRect();
+        const canvasOffset = canvasRect;
+
+        // Calculate potential new bounds
+        const newLeft = blockRect.left;
+        const newTop = blockRect.top;
+        const newRight = newLeft + newPixelWidth;
+        const newBottom = newTop + newPixelHeight;
+
+        // Check for overlap
+        const overlap = !(
+          newRight < otherRect.left ||
+          newLeft > otherRect.right ||
+          newBottom < otherRect.top ||
+          newTop > otherRect.bottom
+        );
+
+        if (overlap) {
+          collision = true;
+        }
+      });
+
+      // Only apply new size if no collision
+      if (!collision) {
+        setGridSize({ width: newWidth, height: newHeight });
+      }
+    } else {
+      setGridSize({ width: newWidth, height: newHeight });
+    }
+  };
+
+  const handleResizeEnd = async () => {
+    if (!isResizing) return;
+
+    setIsResizing(false);
+
+    // Save new dimensions to backend
+    try {
+      await fetch(`http://localhost:5000/api/topics/${topic.id}/dimensions`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grid_width: gridSize.width, grid_height: gridSize.height }),
+      });
+      // Just trigger arrow update without full refresh
+      if (onPositionChange) {
+        onPositionChange();
+      }
+    } catch (error) {
+      console.error('Failed to update topic dimensions:', error);
     }
   };
 
@@ -235,6 +476,17 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
     }
   }, [isDragging, position]);
 
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+      };
+    }
+  }, [isResizing, gridSize]);
+
   // Notify parent when position changes (for arrow updates)
   useEffect(() => {
     if (onPositionChange && isDragging) {
@@ -245,11 +497,13 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
   return (
     <div
       ref={blockRef}
-      className={`topic-block ${isDragging ? 'dragging' : ''}`}
+      className={`topic-block ${isDragging ? 'dragging' : ''} ${isResizing ? 'resizing' : ''} ${isSelected ? 'selected' : ''}`}
       data-topic-id={topic.id}
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
+        width: `${gridSize.width * GRID_CELL_SIZE}px`,
+        height: `${gridSize.height * GRID_CELL_SIZE}px`,
       }}
       onMouseDown={handleMouseDown}
     >
@@ -321,6 +575,14 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
           onAdded={handleReferenceAdded}
           onOpenWebPanel={onOpenWebPanel}
           isPanelOpen={isPanelOpen}
+        />
+      )}
+
+      {/* Resize handle - only bottom-right corner */}
+      {!isRenaming && !isAddingReference && (
+        <div
+          className="resize-handle resize-se"
+          onMouseDown={(e) => handleResizeStart(e, 'se')}
         />
       )}
     </div>

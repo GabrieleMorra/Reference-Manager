@@ -117,6 +117,10 @@
   flex: 1;
   position: relative;
   background-color: #e8e8e8;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.08) 1px, transparent 1px);
+  background-size: 40px 40px;
   overflow: auto;
   transition: all 0.3s ease;
 }
@@ -143,4 +147,13 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   z-index: var(--z-dropdown);
   transition: all 0.3s ease;
+}
+
+.selection-rectangle {
+  position: absolute;
+  border: 1px solid #0078d4;
+  background-color: rgba(0, 120, 212, 0.15);
+  pointer-events: none;
+  z-index: var(--z-arrows);
+  box-shadow: 0 0 0 1px rgba(0, 120, 212, 0.5);
 }

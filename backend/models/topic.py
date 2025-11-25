@@ -47,6 +47,16 @@ def update_topic_position(topic_id, position_x, position_y):
     conn.close()
     return True
 
+def update_topic_dimensions(topic_id, grid_width, grid_height):
+    """Update topic grid dimensions"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE topics SET grid_width = ?, grid_height = ? WHERE id = ?',
+                   (grid_width, grid_height, topic_id))
+    conn.commit()
+    conn.close()
+    return True
+
 def delete_topic(topic_id):
     """Delete topic and all related references (cascade)"""
     conn = get_connection()

@@ -1,6 +1,5 @@
 .topic-block {
   position: absolute;
-  min-width: 200px;
   background-color: white;
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
@@ -9,12 +8,54 @@
   user-select: none;
   transition: box-shadow 0.2s;
   z-index: var(--z-topic-block);
+  overflow: hidden;
 }
 
 .topic-block.dragging {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   cursor: grabbing;
   z-index: var(--z-topic-dragging);
+}
+
+.topic-block.resizing {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: var(--z-topic-dragging);
+}
+
+.topic-block.selected {
+  box-shadow: 0 0 0 3px #007bff;
+  z-index: calc(var(--z-topic-block) + 1);
+}
+
+.topic-block.selected.dragging {
+  box-shadow: 0 0 0 3px #007bff, 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* Resize handle - triangular corner grip */
+.resize-handle {
+  position: absolute;
+  width: 0;
+  height: 0;
+  z-index: 10;
+  cursor: nwse-resize;
+  transition: border-color 0.2s;
+}
+
+.resize-se {
+  bottom: 0;
+  right: 0;
+  border-bottom: 24px solid #999;
+  border-left: 24px solid transparent;
+}
+
+.topic-block:hover .resize-se {
+  border-bottom-color: #007bff;
+}
+
+.resize-se:hover {
+  border-bottom-color: #0056b3 !important;
+  border-bottom-width: 26px;
+  border-left-width: 26px;
 }
 
 .topic-header {
@@ -32,6 +73,12 @@
   cursor: pointer;
   user-select: none;
   flex: 1;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  hyphens: auto;
+  margin: 0;
+  line-height: 1.3;
   margin-right: 15px;
 }
 

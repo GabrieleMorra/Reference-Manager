@@ -83,6 +83,22 @@ def update_topic_position(topic_id):
     topic.update_topic_position(topic_id, position_x, position_y)
     return jsonify({'success': True})
 
+@api.route('/topics/<int:topic_id>/dimensions', methods=['PUT'])
+def update_topic_dimensions(topic_id):
+    data = request.json
+    grid_width = data.get('grid_width')
+    grid_height = data.get('grid_height')
+
+    if grid_width is None or grid_height is None:
+        return jsonify({'error': 'Dimensions are required'}), 400
+
+    # Enforce minimum size
+    if grid_width < 5 or grid_height < 3:
+        return jsonify({'error': 'Minimum size is 5x3'}), 400
+
+    topic.update_topic_dimensions(topic_id, grid_width, grid_height)
+    return jsonify({'success': True})
+
 # Reference routes
 @api.route('/topics/<int:topic_id>/references', methods=['GET'])
 def get_references(topic_id):

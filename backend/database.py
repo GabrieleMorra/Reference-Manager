@@ -29,6 +29,8 @@ def init_database():
             position_x REAL DEFAULT 0,
             position_y REAL DEFAULT 0,
             color TEXT DEFAULT '#007bff',
+            grid_width INTEGER DEFAULT 5,
+            grid_height INTEGER DEFAULT 3,
             FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
         )
     ''')
@@ -59,6 +61,17 @@ def init_database():
     # Add publication_year column if it doesn't exist (for existing databases)
     try:
         cursor.execute('ALTER TABLE paper_references ADD COLUMN publication_year INTEGER')
+    except sqlite3.OperationalError:
+        pass
+
+    # Add grid_width and grid_height columns to topics if they don't exist (for existing databases)
+    try:
+        cursor.execute('ALTER TABLE topics ADD COLUMN grid_width INTEGER DEFAULT 5')
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute('ALTER TABLE topics ADD COLUMN grid_height INTEGER DEFAULT 3')
     except sqlite3.OperationalError:
         pass
 
