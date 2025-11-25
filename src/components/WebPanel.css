@@ -1,0 +1,122 @@
+.web-panel {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 40%;
+  min-width: 400px;
+  max-width: 80%;
+  background-color: white;
+  border-left: 2px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  z-index: var(--z-web-panel);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
+  resize: horizontal;
+  overflow: auto;
+  transition: top 0.3s ease;
+}
+
+.web-panel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 10;
+}
+
+.web-panel::before:hover {
+  background: rgba(0, 123, 255, 0.1);
+}
+
+.web-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid #ddd;
+  background-color: #f8f9fa;
+  gap: 15px;
+}
+
+.web-panel-nav {
+  display: flex;
+  gap: 5px;
+}
+
+.nav-btn {
+  background: none;
+  border: 1px solid #ddd;
+  font-size: 18px;
+  cursor: pointer;
+  color: #333;
+  padding: 4px 10px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.nav-btn:hover:not(:disabled) {
+  background-color: #e9ecef;
+  border-color: #007bff;
+  color: #007bff;
+}
+
+.nav-btn:disabled {
+  color: #ccc;
+  border-color: #e9ecef;
+  cursor: not-allowed;
+}
+
+.web-panel-header h4 {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+  font-weight: 600;
+}
+
+.web-panel-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.external-link-btn,
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #666;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.external-link-btn {
+  font-size: 18px;
+}
+
+.external-link-btn:hover,
+.close-btn:hover {
+  background-color: #e9ecef;
+  color: #333;
+}
+
+.web-panel-iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+  height: 100%;
+}

@@ -10,7 +10,8 @@ function createWindow() {
     height: 800,
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: false,
+      webviewTag: true
     }
   });
   if (process.env.NODE_ENV === "development") {

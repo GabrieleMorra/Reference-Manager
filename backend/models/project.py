@@ -27,3 +27,21 @@ def get_project_by_id(project_id):
     project = cursor.fetchone()
     conn.close()
     return dict(project) if project else None
+
+def update_project_title(project_id, new_title):
+    """Update project title"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE projects SET title = ? WHERE id = ?', (new_title, project_id))
+    conn.commit()
+    conn.close()
+    return True
+
+def delete_project(project_id):
+    """Delete project and all related data (cascade)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM projects WHERE id = ?', (project_id,))
+    conn.commit()
+    conn.close()
+    return True

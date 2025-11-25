@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(nul)",
+      "Bash(set NODE_ENV=development)",
+      "Bash(npm run electron:*)",
+      "Bash(ping:*)",
+      "Bash(git checkout:*)",
+      "Bash(cat:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

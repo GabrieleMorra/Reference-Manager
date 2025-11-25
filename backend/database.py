@@ -43,8 +43,35 @@ def init_database():
             authors TEXT,
             abstract TEXT,
             notes TEXT,
+            citation_count INTEGER DEFAULT 0,
+            publication_year INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (topic_id) REFERENCES topics (id) ON DELETE CASCADE
+        )
+    ''')
+
+    # Add citation_count column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute('ALTER TABLE paper_references ADD COLUMN citation_count INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+
+    # Add publication_year column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute('ALTER TABLE paper_references ADD COLUMN publication_year INTEGER')
+    except sqlite3.OperationalError:
+        pass
+
+    # Reference connections table (for arrows between references)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS reference_connections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_reference_id INTEGER NOT NULL,
+            target_reference_id INTEGER NOT NULL,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (source_reference_id) REFERENCES paper_references (id) ON DELETE CASCADE,
+            FOREIGN KEY (target_reference_id) REFERENCES paper_references (id) ON DELETE CASCADE
         )
     ''')
 
