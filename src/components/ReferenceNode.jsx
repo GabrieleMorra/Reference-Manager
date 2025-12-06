@@ -29,6 +29,7 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
     notes: reference.notes || '',
     citation_count: reference.citation_count || 0,
     publication_year: reference.publication_year || null,
+    bibtex: reference.bibtex || '',
   });
   const nodeRef = useRef(null);
   const tooltipRef = useRef(null);
@@ -218,6 +219,9 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
       if (response.ok) {
         setShowDetails(false);
         onUpdate();
+        if (onUpdateAll) {
+          onUpdateAll(); // Update parent ProjectView to refresh citation count
+        }
       }
     } catch (error) {
       console.error('Failed to delete reference:', error);
@@ -578,6 +582,16 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
                     />
                   </div>
 
+                  <div className="field">
+                    <label>BibTeX Citation</label>
+                    <textarea
+                      value={formData.bibtex}
+                      onChange={(e) => handleChange('bibtex', e.target.value)}
+                      rows="4"
+                      style={{ fontFamily: 'monospace', fontSize: '0.9em' }}
+                    />
+                  </div>
+
                   <div className="modal-actions">
                     <button className="save-btn" onClick={handleSave}>Save Changes</button>
                     <button className="cancel-btn" onClick={handleCancelEdit}>Cancel</button>
@@ -633,6 +647,21 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
                     <div className="field">
                       <label>Personal Notes</label>
                       <p>{reference.notes}</p>
+                    </div>
+                  )}
+
+                  {reference.bibtex && (
+                    <div className="field">
+                      <label>BibTeX Citation</label>
+                      <pre style={{
+                        fontFamily: 'monospace',
+                        fontSize: '0.85em',
+                        whiteSpace: 'pre-wrap',
+                        backgroundColor: '#f5f5f5',
+                        padding: '10px',
+                        borderRadius: '4px',
+                        overflow: 'auto'
+                      }}>{reference.bibtex}</pre>
                     </div>
                   )}
 

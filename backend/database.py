@@ -64,6 +64,12 @@ def init_database():
     except sqlite3.OperationalError:
         pass
 
+    # Add bibtex column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute('ALTER TABLE paper_references ADD COLUMN bibtex TEXT')
+    except sqlite3.OperationalError:
+        pass
+
     # Add grid_width and grid_height columns to topics if they don't exist (for existing databases)
     try:
         cursor.execute('ALTER TABLE topics ADD COLUMN grid_width INTEGER DEFAULT 5')

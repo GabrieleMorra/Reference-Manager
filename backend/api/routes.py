@@ -116,7 +116,8 @@ def create_reference(topic_id):
         data.get('abstract', ''),
         data.get('notes', ''),
         data.get('citation_count', 0),
-        data.get('publication_year', None)
+        data.get('publication_year', None),
+        data.get('bibtex', '')
     )
     return jsonify({'id': reference_id}), 201
 
@@ -131,7 +132,8 @@ def update_reference_route(reference_id):
         data.get('abstract', ''),
         data.get('notes', ''),
         data.get('citation_count', 0),
-        data.get('publication_year', None)
+        data.get('publication_year', None),
+        data.get('bibtex', '')
     )
     return jsonify({'success': True})
 
@@ -201,3 +203,31 @@ def update_connection_route(connection_id):
 def delete_connection_route(connection_id):
     connection.delete_connection(connection_id)
     return jsonify({'success': True})
+
+# Export bibliography
+@api.route('/projects/<int:project_id>/export/bibliography', methods=['GET'])
+def export_bibliography(project_id):
+    """Export all BibTeX entries for a project"""
+    try:
+        # Get all topics for this project
+        topics = topic.get_topics_by_project(project_id)
+
+        # Collect all unique references by DOI or title
+        unique_refs = {}
+        for t in topics:
+            if 'references' in t:
+                for ref in t['references']:
+                    # Use DOI as unique key if available, otherwise use title
+                    key = ref.get('doi', '').strip().lower() if ref.get('doi', '').strip() else ref.get('title', '').strip().lower()
+                    if key and ref.get('bibtex'):
+                        unique_refs[key] = ref.get('bibtex')
+
+        # Join all BibTeX entries
+        bibliography = '\n\n'.join(unique_refs.values())
+
+        return jsonify({
+            'bibliography': bibliography,
+            'count': len(unique_refs)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

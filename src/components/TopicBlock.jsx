@@ -58,6 +58,7 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
   const handleReferenceAdded = () => {
     setIsAddingReference(false);
     loadReferences();
+    onUpdate(); // Update parent ProjectView to refresh citation count
   };
 
   const toggleMenu = (e) => {
@@ -592,9 +593,6 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, isPanelOpen, onConnection
 function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, isPanelOpen }) {
   const [searchMode, setSearchMode] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchType, setSearchType] = useState('title');
-  const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     doi: '',
@@ -603,44 +601,16 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, isPanelO
     notes: '',
     citation_count: 0,
     publication_year: null,
+    bibtex: '',
   });
 
-  const handleSearch = async () => {
+  const handleSearchInScholar = () => {
     if (!searchQuery.trim()) return;
 
-    setIsSearching(true);
-    try {
-      const response = await fetch('http://localhost:5000/api/search/papers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: searchQuery,
-          search_type: searchType,
-          limit: 10,
-        }),
-      });
-
-      if (response.ok) {
-        const results = await response.json();
-        setSearchResults(results);
-      }
-    } catch (error) {
-      console.error('Failed to search papers:', error);
-    } finally {
-      setIsSearching(false);
+    const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(searchQuery)}`;
+    if (onOpenWebPanel) {
+      onOpenWebPanel(scholarUrl);
     }
-  };
-
-  const handleSelectPaper = (paper) => {
-    setFormData({
-      title: paper.title || '',
-      doi: paper.doi || '',
-      authors: paper.authors || '',
-      abstract: paper.abstract || '',
-      notes: '',
-      citation_count: paper.citation_count || 0,
-      publication_year: paper.year || null,
-    });
     setSearchMode(false);
   };
 
@@ -673,77 +643,28 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, isPanelO
         <div className="modal-backdrop" onClick={onCancel} />
         <div className={`reference-search ${isPanelOpen ? 'with-panel' : ''}`} onClick={(e) => e.stopPropagation()}>
           <h4>Search for Paper</h4>
-        <div className="search-controls">
-          <select value={searchType} onChange={(e) => setSearchType(e.target.value)}>
-            <option value="title">Title</option>
-            <option value="author">Author</option>
-            <option value="doi">DOI</option>
-          </select>
-          <input
-            type="text"
-            placeholder={`Search by ${searchType}...`}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-            autoFocus
-          />
-          <button onClick={handleSearch} disabled={isSearching}>
-            {isSearching ? 'Searching...' : 'Search'}
-          </button>
-        </div>
-
-        {searchResults.length > 0 && (
-          <div className="search-results">
-            {searchResults.map((paper, index) => (
-              <div
-                key={index}
-                className="search-result-item"
-                onClick={() => handleSelectPaper(paper)}
-              >
-                <h5>{paper.title}</h5>
-                <p className="result-authors">{paper.authors}</p>
-                <p className="result-meta">
-                  {paper.year && <span>{paper.year}</span>}
-                  {paper.venue && <span> · {paper.venue}</span>}
-                  {paper.citation_count !== undefined && (
-                    <span> · {paper.citation_count} citations</span>
-                  )}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="search-footer">
-          <button onClick={() => setSearchMode(false)}>Add Manually</button>
-          <button onClick={onCancel}>Cancel</button>
-        </div>
-
-        <div className="scholar-link">
-          <p>
-            Not found your paper? Search in{' '}
-            <a
-              href="#"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Google Scholar clicked!');
-                console.log('onOpenWebPanel exists:', !!onOpenWebPanel);
-                const scholarUrl = `https://scholar.google.com/scholar?q=${encodeURIComponent(searchQuery)}`;
-                console.log('Opening URL:', scholarUrl);
-                if (onOpenWebPanel) {
-                  onOpenWebPanel(scholarUrl);
-                } else {
-                  console.error('onOpenWebPanel is not defined!');
+          <div className="search-controls">
+            <input
+              type="text"
+              placeholder="Search in Google Scholar..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSearchInScholar();
                 }
-                setSearchMode(false);
               }}
-            >
-              Google Scholar
-            </a>
-          </p>
+              autoFocus
+            />
+            <button onClick={handleSearchInScholar}>Search</button>
+          </div>
+
+          <div className="search-footer">
+            <button onClick={() => setSearchMode(false)}>Add Manually</button>
+            <button onClick={onCancel}>Cancel</button>
+          </div>
         </div>
-      </div>
       </>,
       document.body
     );
@@ -751,7 +672,7 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, isPanelO
 
   return createPortal(
     <div className={`reference-form ${isPanelOpen ? 'with-panel' : ''}`} onClick={(e) => e.stopPropagation()}>
-      <h4>Review & Add Reference</h4>
+      <h4>Add Reference</h4>
       <form onSubmit={handleSubmit}>
         <input
           type="text"
@@ -787,6 +708,12 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, isPanelO
           value={formData.citation_count}
           onChange={(e) => handleChange('citation_count', parseInt(e.target.value) || 0)}
           min="0"
+        />
+        <textarea
+          placeholder="BibTeX citation"
+          value={formData.bibtex}
+          onChange={(e) => handleChange('bibtex', e.target.value)}
+          rows="4"
         />
         <textarea
           placeholder="Abstract"

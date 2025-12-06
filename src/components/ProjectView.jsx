@@ -411,12 +411,43 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
     return uniqueRefs.size;
   };
 
+  const handleExportBibliography = async () => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/projects/${project.id}/export/bibliography`);
+      const data = await response.json();
+
+      if (data.bibliography) {
+        // Create a blob and download
+        const blob = new Blob([data.bibliography], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${project.title.replace(/[^a-z0-9]/gi, '_')}_bibliography.bib`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        alert(`Exported ${data.count} unique BibTeX entries`);
+      } else {
+        alert('No BibTeX entries found in this project');
+      }
+    } catch (error) {
+      console.error('Failed to export bibliography:', error);
+      alert('Failed to export bibliography');
+    }
+  };
+
   return (
     <div className={`project-view ${isPanelOpen ? 'with-panel' : ''}`}>
       <div className="project-header">
         <button onClick={onBack}>← Back to Projects</button>
         <h2>{project.title}</h2>
-        <button onClick={() => setIsAddingTopic(true)}>+ Add Topic</button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button onClick={() => onOpenWebPanel('https://scholar.google.com')}>Google Scholar</button>
+          <button onClick={handleExportBibliography}>Export Bibliography</button>
+          <button onClick={() => setIsAddingTopic(true)}>+ Add Topic</button>
+        </div>
       </div>
 
       {isAddingTopic && (
