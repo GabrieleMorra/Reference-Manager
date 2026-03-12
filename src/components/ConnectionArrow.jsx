@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import './ConnectionArrow.css';
 
-function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit }) {
+function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit, zoom = 1 }) {
   const [isHovered, setIsHovered] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
@@ -14,7 +14,6 @@ function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit })
   // Calculate arrow path
   const dx = targetPos.x - sourcePos.x;
   const dy = targetPos.y - sourcePos.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
   const angle = Math.atan2(dy, dx);
 
   // Circle radius (reference node is 30px diameter, so 15px radius)
@@ -131,7 +130,7 @@ function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit })
   return (
     <>
       <g>
-        {/* Invisible thicker path for easier hovering */}
+        {/* Invisible thicker path for easier hovering — clicks pass through */}
         <path
           d={pathD}
           fill="none"
@@ -139,7 +138,31 @@ function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit })
           strokeWidth="20"
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
-          style={{ cursor: 'pointer' }}
+          onClick={(e) => {
+            // Check if a priority element (+ button, menu button, reference) is underneath
+            const svg = e.currentTarget.closest('svg');
+            if (!svg) return;
+            svg.style.pointerEvents = 'none';
+            const below = document.elementFromPoint(e.clientX, e.clientY);
+            svg.style.pointerEvents = '';
+            if (below) {
+              const priority = below.closest('.add-button, .menu-button, .reference-node');
+              if (priority) {
+                priority.click();
+                return;
+              }
+            }
+            // No priority element — toggle arrow tooltip
+            if (showTooltip) {
+              setShowTooltip(false);
+              setIsHovered(false);
+            } else {
+              setShowTooltip(true);
+              setIsHovered(true);
+              updateTooltipPosition(e.clientX, e.clientY);
+            }
+          }}
+          style={{ cursor: 'pointer', pointerEvents: 'auto' }}
         />
 
         {/* Visible arrow path */}
@@ -159,14 +182,16 @@ function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit })
         />
       </g>
 
-      {showTooltip && connection.description && createPortal(
+      {showTooltip && createPortal(
         <div
           ref={tooltipRef}
           className="connection-tooltip"
           style={{
             position: 'fixed',
             left: `${tooltipPosition.x}px`,
-            top: `${tooltipPosition.y}px`
+            top: `${tooltipPosition.y}px`,
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top left',
           }}
           onMouseEnter={handleTooltipMouseEnter}
           onMouseLeave={handleTooltipMouseLeave}
@@ -175,7 +200,7 @@ function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit })
             <button
               className="connection-tooltip-btn"
               onClick={() => onEdit(connection)}
-              title="Modifica"
+              title="Edit"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -185,7 +210,7 @@ function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit })
             <button
               className="connection-tooltip-btn delete"
               onClick={() => onDelete(connection.id)}
-              title="Elimina"
+              title="Delete"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="3 6 5 6 21 6"></polyline>
@@ -193,9 +218,11 @@ function ConnectionArrow({ connection, sourcePos, targetPos, onDelete, onEdit })
               </svg>
             </button>
           </div>
-          <div className="connection-tooltip-content">
-            {connection.description}
-          </div>
+          {connection.description && (
+            <div className="connection-tooltip-content">
+              {connection.description}
+            </div>
+          )}
         </div>,
         document.body
       )}

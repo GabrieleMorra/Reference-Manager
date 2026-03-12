@@ -1,15 +1,18 @@
+/* ConnectionArrow — Phase 1 redesign */
+
 .connection-arrow {
-  transition: stroke 0.2s ease;
+  transition: stroke 200ms ease;
 }
 
 .connection-tooltip {
-  background-color: white;
-  border: 2px solid #003d82;
-  border-radius: 6px;
-  padding: 8px 10px;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
   min-width: 150px;
   max-width: 300px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-lg);
   z-index: var(--z-tooltip);
   pointer-events: auto;
 }
@@ -17,32 +20,32 @@
 .connection-tooltip-header {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
-  margin-bottom: 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #ddd;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .connection-tooltip-btn {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 3px;
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #666;
-  transition: background-color 0.2s, color 0.2s;
+  color: var(--color-text-muted);
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
 .connection-tooltip-btn:hover {
-  background-color: #f0f0f0;
-  color: #333;
+  background-color: var(--color-bg-elevated);
+  color: var(--color-text-primary);
 }
 
 .connection-tooltip-btn.delete {
-  color: #dc3545;
+  color: var(--color-danger);
 }
 
 .connection-tooltip-btn.delete:hover {
@@ -51,7 +54,7 @@
 
 .connection-tooltip-content {
   font-size: 12px;
-  color: #333;
+  color: var(--color-text-primary);
   line-height: 1.4;
   word-wrap: break-word;
 }

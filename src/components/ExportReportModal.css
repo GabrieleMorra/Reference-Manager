@@ -1,0 +1,207 @@
+/* ExportReportModal — appears above web panel */
+
+.export-report-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: var(--z-modal-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: erm-fadeIn 150ms ease both;
+}
+
+@keyframes erm-fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes erm-scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.export-report-modal {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  width: 680px;
+  max-width: 90vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  z-index: var(--z-modal);
+  animation: erm-scaleIn 200ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* Header */
+.export-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.export-report-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.export-report-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.export-report-stats {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-secondary);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-full);
+}
+
+.export-report-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 150ms ease;
+}
+
+.export-report-close:hover {
+  background: var(--color-surface-secondary);
+  color: var(--color-text-primary);
+}
+
+/* Toolbar */
+.export-report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.export-format-toggle {
+  display: flex;
+  background: var(--color-surface-secondary);
+  border-radius: var(--radius-md);
+  padding: 2px;
+}
+
+.format-btn {
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 150ms ease;
+}
+
+.format-btn.active {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.format-btn:not(.active):hover {
+  color: var(--color-text-primary);
+}
+
+.export-report-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.export-action-btn {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.export-action-btn.copy {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+.export-action-btn.copy:hover:not(:disabled) {
+  background: var(--color-surface-secondary);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.export-action-btn.download {
+  border: none;
+  background: var(--color-primary);
+  color: white;
+}
+
+.export-action-btn.download:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.export-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Preview */
+.export-report-preview {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5);
+  min-height: 200px;
+}
+
+.export-report-content {
+  margin: 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.export-report-loading,
+.export-report-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  font-size: 14px;
+}
+
+.export-report-loading {
+  color: var(--color-text-muted);
+}
+
+.export-report-error {
+  color: var(--color-danger);
+}

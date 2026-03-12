@@ -41,7 +41,11 @@ def delete_project_route(project_id):
 # Topic routes
 @api.route('/projects/<int:project_id>/topics', methods=['GET'])
 def get_topics(project_id):
-    topics = topic.get_topics_by_project(project_id)
+    fields = request.args.get('fields', '')
+    if fields == 'summary':
+        topics = topic.get_topics_by_project_summary(project_id)
+    else:
+        topics = topic.get_topics_by_project(project_id)
     return jsonify(topics)
 
 @api.route('/projects/<int:project_id>/topics', methods=['POST'])
@@ -149,6 +153,13 @@ def move_reference_route(reference_id):
     reference.move_reference(reference_id, target_topic_id)
     return jsonify({'success': True})
 
+@api.route('/topics/<int:topic_id>/references/reorder', methods=['PUT'])
+def reorder_references_route(topic_id):
+    data = request.json
+    reference_ids = data.get('reference_ids', [])
+    reference.reorder_references(topic_id, reference_ids)
+    return jsonify({'success': True})
+
 @api.route('/references/<int:reference_id>/duplicate', methods=['POST'])
 def duplicate_reference_route(reference_id):
     data = request.json
@@ -228,6 +239,63 @@ def export_bibliography(project_id):
         return jsonify({
             'bibliography': bibliography,
             'count': len(unique_refs)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# Export report (references + notes + connections)
+@api.route('/projects/<int:project_id>/export/report', methods=['GET'])
+def export_report(project_id):
+    """Export a structured report: references grouped by topic, with notes and connections"""
+    try:
+        proj = project.get_project_by_id(project_id)
+        if not proj:
+            return jsonify({'error': 'Project not found'}), 404
+
+        topics_data = topic.get_topics_by_project(project_id)
+        connections_data = connection.get_connections_by_project(project_id)
+
+        # Build a lookup: ref id -> ref data (including topic name)
+        ref_lookup = {}
+        report_topics = []
+        for t in topics_data:
+            topic_refs = []
+            for ref in t.get('references', []):
+                ref_lookup[ref['id']] = {**ref, 'topic_name': t['name']}
+                topic_refs.append({
+                    'id': ref['id'],
+                    'title': ref.get('title', ''),
+                    'authors': ref.get('authors', ''),
+                    'doi': ref.get('doi', ''),
+                    'publication_year': ref.get('publication_year'),
+                    'citation_count': ref.get('citation_count', 0),
+                    'notes': ref.get('notes', ''),
+                })
+            report_topics.append({
+                'name': t['name'],
+                'color': t.get('color', '#007bff'),
+                'references': topic_refs,
+            })
+
+        # Build connections with readable titles
+        report_connections = []
+        for conn in connections_data:
+            src = ref_lookup.get(conn['source_reference_id'])
+            tgt = ref_lookup.get(conn['target_reference_id'])
+            if src and tgt:
+                report_connections.append({
+                    'source_title': src['title'],
+                    'source_topic': src['topic_name'],
+                    'target_title': tgt['title'],
+                    'target_topic': tgt['topic_name'],
+                    'description': conn.get('description', ''),
+                })
+
+        return jsonify({
+            'project_title': proj['title'],
+            'topics': report_topics,
+            'connections': report_connections,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

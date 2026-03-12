@@ -60,14 +60,3 @@ def delete_connection(connection_id):
     conn.commit()
     conn.close()
 
-def get_connection_by_id(connection_id):
-    """Get a specific connection by ID"""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute('SELECT * FROM reference_connections WHERE id = ?', (connection_id,))
-
-    connection = cursor.fetchone()
-    conn.close()
-
-    return dict(connection) if connection else None

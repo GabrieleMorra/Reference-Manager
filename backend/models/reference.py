@@ -4,7 +4,7 @@ def get_references_by_topic(topic_id):
     """Get all references for a topic"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM paper_references WHERE topic_id = ?', (topic_id,))
+    cursor.execute('SELECT * FROM paper_references WHERE topic_id = ? ORDER BY sort_order ASC, id ASC', (topic_id,))
     references = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return references
@@ -58,6 +58,19 @@ def move_reference(reference_id, target_topic_id):
     conn.close()
     return True
 
+def reorder_references(topic_id, reference_ids):
+    """Reorder references within a topic by updating sort_order"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    for index, ref_id in enumerate(reference_ids):
+        cursor.execute(
+            'UPDATE paper_references SET sort_order = ? WHERE id = ? AND topic_id = ?',
+            (index, ref_id, topic_id)
+        )
+    conn.commit()
+    conn.close()
+    return True
+
 def duplicate_reference(reference_id, target_topic_id):
     """Duplicate a reference to another topic"""
     conn = get_connection()
@@ -76,7 +89,7 @@ def duplicate_reference(reference_id, target_topic_id):
         '''INSERT INTO paper_references (topic_id, title, doi, authors, abstract, notes, citation_count, publication_year, bibtex)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (target_topic_id, original['title'], original['doi'], original['authors'],
-         original['abstract'], original['notes'], original['citation_count'], original['publication_year'], original.get('bibtex', ''))
+         original['abstract'], original['notes'], original['citation_count'], original['publication_year'], original['bibtex'])
     )
     new_reference_id = cursor.lastrowid
     conn.commit()

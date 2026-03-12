@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import TopicBlock from './TopicBlock';
 import ConnectionArrow from './ConnectionArrow';
 import ConnectionModal from './ConnectionModal';
@@ -14,12 +14,18 @@ const TOPIC_COLORS = [
   '#fd7e14', // Orange
 ];
 
-function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicStateChange }) {
+function ProjectView({ project, onOpenWebPanel, onCloseWebPanel, isPanelOpen, isAddingTopic, onSetIsAddingTopic, webPanelRef, webPanelHidden, onSetWebPanelHidden }) {
   const [topics, setTopics] = useState([]);
   const [newTopicName, setNewTopicName] = useState('');
   const [selectedColor, setSelectedColor] = useState(TOPIC_COLORS[0]);
-  const [isAddingTopic, setIsAddingTopic] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterHasNotes, setFilterHasNotes] = useState(false);
+  const [filterYearMin, setFilterYearMin] = useState('');
+  const [filterYearMax, setFilterYearMax] = useState('');
+  const [filterCitationsMin, setFilterCitationsMin] = useState('');
+  const searchInputRef = useRef(null);
 
   // Multi-selection state
   const [selectedTopics, setSelectedTopics] = useState(new Set());
@@ -38,6 +44,7 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
   const [editingConnection, setEditingConnection] = useState(null);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [arrowUpdateTrigger, setArrowUpdateTrigger] = useState(0);
+  const [zoom, setZoom] = useState(1.0);
   const workspaceRef = useRef(null);
 
   useEffect(() => {
@@ -45,20 +52,15 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
   }, [project.id]);
 
   useEffect(() => {
-    // Notify parent component when add topic state changes
-    if (onAddTopicStateChange) {
-      onAddTopicStateChange(isAddingTopic);
-    }
-  }, [isAddingTopic, onAddTopicStateChange]);
-
-  useEffect(() => {
     // Track mouse movement when connecting (but not when modal is shown)
     const handleMouseMove = (e) => {
       if (isConnecting && !showConnectionModal && workspaceRef.current) {
         const workspaceRect = workspaceRef.current.getBoundingClientRect();
+        const scrollLeft = workspaceRef.current.scrollLeft || 0;
+        const scrollTop = workspaceRef.current.scrollTop || 0;
         setMousePosition({
-          x: e.clientX - workspaceRect.left,
-          y: e.clientY - workspaceRect.top
+          x: (e.clientX - workspaceRect.left + scrollLeft) / zoom,
+          y: (e.clientY - workspaceRect.top + scrollTop) / zoom
         });
       }
     };
@@ -82,7 +84,7 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isConnecting, showConnectionModal]);
+  }, [isConnecting, showConnectionModal, zoom]);
 
   useEffect(() => {
     // Clear selection when CTRL is released (but not when rectangle selecting)
@@ -125,13 +127,28 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
     if (!newTopicName.trim()) return;
 
     try {
+      // Find position below the lowest topic on the left side
+      let newPosX = 50;
+      let newPosY = 50;
+      if (topics.length > 0) {
+        let lowestBottom = 0;
+        topics.forEach(t => {
+          const h = (t.grid_height || 3) * 40;
+          const bottom = t.position_y + h;
+          if (bottom > lowestBottom) {
+            lowestBottom = bottom;
+          }
+        });
+        newPosY = lowestBottom + 40; // 40px gap below lowest block
+      }
+
       const response = await fetch(`http://localhost:5000/api/projects/${project.id}/topics`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newTopicName,
-          position_x: 50,
-          position_y: 50 + topics.length * 150,
+          position_x: newPosX,
+          position_y: newPosY,
           color: selectedColor,
         }),
       });
@@ -139,7 +156,7 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
       if (response.ok) {
         setNewTopicName('');
         setSelectedColor(TOPIC_COLORS[0]); // Reset to default color
-        setIsAddingTopic(false);
+        onSetIsAddingTopic(false);
         loadTopics();
       }
     } catch (error) {
@@ -152,13 +169,19 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
     setIsConnecting(true);
     setConnectionStart({ referenceId, nodeElement });
 
-    // Initialize mouse position at the node location
-    if (nodeElement && workspaceRef.current) {
+    // Initialize mouse position at the node location using canvas-space positions
+    const positions = getReferencePositions();
+    const startPos = positions[referenceId];
+    if (startPos) {
+      setMousePosition({ x: startPos.x, y: startPos.y });
+    } else if (nodeElement && workspaceRef.current) {
       const nodeRect = nodeElement.getBoundingClientRect();
       const workspaceRect = workspaceRef.current.getBoundingClientRect();
+      const scrollLeft = workspaceRef.current.scrollLeft || 0;
+      const scrollTop = workspaceRef.current.scrollTop || 0;
       setMousePosition({
-        x: nodeRect.left - workspaceRect.left + nodeRect.width / 2,
-        y: nodeRect.top - workspaceRect.top + nodeRect.height / 2
+        x: (nodeRect.left - workspaceRect.left + scrollLeft + nodeRect.width / 2) / zoom,
+        y: (nodeRect.top - workspaceRect.top + scrollTop + nodeRect.height / 2) / zoom
       });
     }
   };
@@ -232,7 +255,7 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
   };
 
   const handleDeleteConnection = async (connectionId) => {
-    if (!window.confirm('Eliminare questo collegamento?')) return;
+    if (!window.confirm('Delete this connection?')) return;
 
     try {
       const response = await fetch(`http://localhost:5000/api/connections/${connectionId}`, {
@@ -274,9 +297,12 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
   };
 
   // Handle topic position changes (for real-time arrow updates)
+  const [minimapTrigger, setMinimapTrigger] = useState(0);
+
   const handleTopicPositionChange = () => {
-    // Trigger re-render of arrows by updating state
+    // Trigger re-render of arrows and minimap by updating state
     setArrowUpdateTrigger(prev => prev + 1);
+    setMinimapTrigger(prev => prev + 1);
   };
 
   // Multi-selection handlers
@@ -301,34 +327,205 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
     setSelectedTopics(new Set());
   };
 
+  // Zoom handlers
+  const ZOOM_MIN = 0.3;
+  const ZOOM_MAX = 2.0;
+  const ZOOM_STEP = 0.1;
+
+  const clampZoom = (z) => Math.round(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z)) * 10) / 10;
+
+  const handleZoomIn = useCallback(() => {
+    setZoom(prev => clampZoom(prev + ZOOM_STEP));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoom(prev => clampZoom(prev - ZOOM_STEP));
+  }, []);
+
+  const handleZoomReset = useCallback(() => {
+    setZoom(1.0);
+  }, []);
+
+  // Update arrows when zoom changes
+  useEffect(() => {
+    setArrowUpdateTrigger(prev => prev + 1);
+  }, [zoom]);
+
+  // Ctrl+scroll zoom on canvas
+  const handleCanvasWheel = useCallback((e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      if (e.deltaY < 0) {
+        setZoom(prev => clampZoom(prev + ZOOM_STEP));
+      } else {
+        setZoom(prev => clampZoom(prev - ZOOM_STEP));
+      }
+    }
+  }, []);
+
+  // Attach wheel listener with { passive: false } to allow preventDefault
+  useEffect(() => {
+    const canvas = workspaceRef.current;
+    if (!canvas) return;
+    canvas.addEventListener('wheel', handleCanvasWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleCanvasWheel);
+  }, [handleCanvasWheel]);
+
+  // Track scroll position for minimap viewport updates
+  const [scrollPos, setScrollPos] = useState({ left: 0, top: 0 });
+  useEffect(() => {
+    const canvas = workspaceRef.current;
+    if (!canvas) return;
+    const handleScroll = () => {
+      setScrollPos({ left: canvas.scrollLeft, top: canvas.scrollTop });
+    };
+    canvas.addEventListener('scroll', handleScroll);
+    return () => canvas.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Keyboard shortcuts for zoom
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === '=' || e.key === '+') {
+          e.preventDefault();
+          handleZoomIn();
+        } else if (e.key === '-') {
+          e.preventDefault();
+          handleZoomOut();
+        } else if (e.key === '0') {
+          e.preventDefault();
+          handleZoomReset();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleZoomIn, handleZoomOut, handleZoomReset]);
+
+  // Auto-collapse sidebar at narrow widths
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const handler = (e) => setSidebarExpanded(!e.matches);
+    handler(mq);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+
+  const handleSidebarTopicClick = (topicId) => {
+    const el = document.querySelector(`[data-topic-id="${topicId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    }
+  };
+
+  const getTotalReferencesCount = () => {
+    let count = 0;
+    topics.forEach(t => { if (t.references) count += t.references.length; });
+    return count;
+  };
+
+  // Ctrl+F / Ctrl+K to focus search
+  useEffect(() => {
+    const handleSearchShortcut = (e) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'k')) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleSearchShortcut);
+    return () => window.removeEventListener('keydown', handleSearchShortcut);
+  }, []);
+
+  const hasActiveFilter = searchQuery || filterHasNotes || filterYearMin || filterYearMax || filterCitationsMin;
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setFilterHasNotes(false);
+    setFilterYearMin('');
+    setFilterYearMax('');
+    setFilterCitationsMin('');
+  };
+
+  const referenceMatchesFilter = (ref) => {
+    if (!hasActiveFilter) return true;
+    const q = searchQuery.toLowerCase();
+    if (q) {
+      const matchesText = (ref.title || '').toLowerCase().includes(q)
+        || (ref.authors || '').toLowerCase().includes(q)
+        || (ref.doi || '').toLowerCase().includes(q)
+        || (ref.notes || '').toLowerCase().includes(q);
+      if (!matchesText) return false;
+    }
+    if (filterHasNotes && !(ref.notes && ref.notes.trim())) return false;
+    if (filterYearMin && ref.publication_year < parseInt(filterYearMin)) return false;
+    if (filterYearMax && ref.publication_year > parseInt(filterYearMax)) return false;
+    if (filterCitationsMin && (ref.citation_count || 0) < parseInt(filterCitationsMin)) return false;
+    return true;
+  };
+
+  // Convert mouse event to canvas-space coordinates (accounts for scroll + zoom)
+  const mouseToCanvas = (e) => {
+    const container = workspaceRef.current;
+    const rect = container.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left + container.scrollLeft) / zoom,
+      y: (e.clientY - rect.top + container.scrollTop) / zoom,
+    };
+  };
+
+  // Middle-mouse pan state
+  const isPanningRef = useRef(false);
+  const panStartRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+
   // Rectangle selection handlers
   const handleCanvasMouseDown = (e) => {
-    // Only start rectangle selection if clicking on canvas background
-    if (e.target.classList.contains('canvas')) {
-      const workspaceRect = workspaceRef.current.getBoundingClientRect();
-      const startX = e.clientX - workspaceRect.left;
-      const startY = e.clientY - workspaceRect.top;
+    // Middle mouse button (button 1) = pan
+    if (e.button === 1) {
+      e.preventDefault();
+      isPanningRef.current = true;
+      panStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        scrollLeft: workspaceRef.current.scrollLeft,
+        scrollTop: workspaceRef.current.scrollTop,
+      };
+      workspaceRef.current.style.cursor = 'grabbing';
+      return;
+    }
+
+    // Only start rectangle selection if clicking on canvas background or canvas-content
+    if (e.target.classList.contains('canvas') || e.target.classList.contains('canvas-content')) {
+      const pos = mouseToCanvas(e);
 
       setIsRectSelecting(true);
-      setRectStart({ x: startX, y: startY });
-      setRectEnd({ x: startX, y: startY });
+      setRectStart(pos);
+      setRectEnd(pos);
       clearSelection(); // Clear existing selection when starting new rectangle selection
     }
   };
 
   const handleCanvasMouseMove = (e) => {
+    if (isPanningRef.current) {
+      const dx = e.clientX - panStartRef.current.x;
+      const dy = e.clientY - panStartRef.current.y;
+      workspaceRef.current.scrollLeft = panStartRef.current.scrollLeft - dx;
+      workspaceRef.current.scrollTop = panStartRef.current.scrollTop - dy;
+      return;
+    }
     if (isRectSelecting) {
-      const workspaceRect = workspaceRef.current.getBoundingClientRect();
-      const currentX = e.clientX - workspaceRect.left;
-      const currentY = e.clientY - workspaceRect.top;
-
-      setRectEnd({ x: currentX, y: currentY });
+      setRectEnd(mouseToCanvas(e));
     }
   };
 
   const handleCanvasMouseUp = (e) => {
+    if (isPanningRef.current) {
+      isPanningRef.current = false;
+      workspaceRef.current.style.cursor = '';
+      return;
+    }
     if (isRectSelecting) {
-      // Calculate selection rectangle bounds
+      // Selection rect bounds are now in canvas-space
       const minX = Math.min(rectStart.x, rectEnd.x);
       const maxX = Math.max(rectStart.x, rectEnd.x);
       const minY = Math.min(rectStart.y, rectEnd.y);
@@ -336,16 +533,19 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
 
       // Find all topics that intersect with the selection rectangle
       const selectedIds = new Set();
+      const container = workspaceRef.current;
+      const containerRect = container.getBoundingClientRect();
+
       topics.forEach(topic => {
         const topicElement = document.querySelector(`[data-topic-id="${topic.id}"]`);
         if (topicElement) {
           const topicRect = topicElement.getBoundingClientRect();
-          const workspaceRect = workspaceRef.current.getBoundingClientRect();
 
-          const topicLeft = topicRect.left - workspaceRect.left;
-          const topicTop = topicRect.top - workspaceRect.top;
-          const topicRight = topicLeft + topicRect.width;
-          const topicBottom = topicTop + topicRect.height;
+          // Convert topic screen-space bounds to canvas-space
+          const topicLeft = (topicRect.left - containerRect.left + container.scrollLeft) / zoom;
+          const topicTop = (topicRect.top - containerRect.top + container.scrollTop) / zoom;
+          const topicRight = topicLeft + topicRect.width / zoom;
+          const topicBottom = topicTop + topicRect.height / zoom;
 
           // Check if rectangles intersect
           if (!(topicRight < minX || topicLeft > maxX || topicBottom < minY || topicTop > maxY)) {
@@ -359,13 +559,20 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
     }
   };
 
-  // Get reference node positions for rendering arrows
+  // Get reference node positions for rendering arrows (all canvas-space)
   const getReferencePositions = () => {
     const GRID_CELL_SIZE = 40;
     const positions = {};
 
     topics.forEach(topic => {
       if (topic.references) {
+        const topicElement = document.querySelector(`[data-topic-id="${topic.id}"]`);
+        if (!topicElement) return;
+
+        // Use canvas-space position directly from the element's inline style
+        const topicX = parseFloat(topicElement.style.left) || 0;
+        const topicY = parseFloat(topicElement.style.top) || 0;
+
         const gridWidth = topic.grid_width || 5;
         const topicPixelWidth = gridWidth * GRID_CELL_SIZE;
         const padding = 30; // 15px left + 15px right
@@ -373,25 +580,28 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
         const refsPerRow = Math.floor(availableWidth / 40); // 30px circle + 10px gap = 40px per ref
 
         topic.references.forEach((ref, index) => {
-          const topicElement = document.querySelector(`[data-topic-id="${topic.id}"]`);
-          if (topicElement) {
-            const topicRect = topicElement.getBoundingClientRect();
-            const workspaceRect = workspaceRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+          const row = Math.floor(index / refsPerRow);
+          const col = index % refsPerRow;
 
-            // Calculate row and column
-            const row = Math.floor(index / refsPerRow);
-            const col = index % refsPerRow;
-
-            // Position with multi-row support
-            positions[ref.id] = {
-              x: topicRect.left - workspaceRect.left + 15 + (col * 40) + 15, // +15 for circle center
-              y: topicRect.top - workspaceRect.top + 70 + (row * 40) + 15 // 70 = header height, +15 for circle center
-            };
-          }
+          positions[ref.id] = {
+            x: topicX + 15 + (col * 40) + 15,
+            y: topicY + 70 + (row * 40) + 15
+          };
         });
       }
     });
     return positions;
+  };
+
+  // Look up a reference title by ID from loaded topics
+  const getReferenceTitleById = (refId) => {
+    for (const topic of topics) {
+      if (topic.references) {
+        const ref = topic.references.find(r => r.id === refId);
+        if (ref) return ref.title;
+      }
+    }
+    return '';
   };
 
   // Calculate unique citations count
@@ -411,45 +621,8 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
     return uniqueRefs.size;
   };
 
-  const handleExportBibliography = async () => {
-    try {
-      const response = await fetch(`http://localhost:5000/api/projects/${project.id}/export/bibliography`);
-      const data = await response.json();
-
-      if (data.bibliography) {
-        // Create a blob and download
-        const blob = new Blob([data.bibliography], { type: 'text/plain' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${project.title.replace(/[^a-z0-9]/gi, '_')}_bibliography.bib`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-
-        alert(`Exported ${data.count} unique BibTeX entries`);
-      } else {
-        alert('No BibTeX entries found in this project');
-      }
-    } catch (error) {
-      console.error('Failed to export bibliography:', error);
-      alert('Failed to export bibliography');
-    }
-  };
-
   return (
     <div className={`project-view ${isPanelOpen ? 'with-panel' : ''}`}>
-      <div className="project-header">
-        <button onClick={onBack}>← Back to Projects</button>
-        <h2>{project.title}</h2>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={() => onOpenWebPanel('https://scholar.google.com')}>Google Scholar</button>
-          <button onClick={handleExportBibliography}>Export Bibliography</button>
-          <button onClick={() => setIsAddingTopic(true)}>+ Add Topic</button>
-        </div>
-      </div>
-
       {isAddingTopic && (
         <div className="add-topic-form" onClick={(e) => e.stopPropagation()}>
           <input
@@ -473,9 +646,97 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
             ))}
           </div>
           <button onClick={handleAddTopic}>Add</button>
-          <button onClick={() => setIsAddingTopic(false)}>Cancel</button>
+          <button onClick={() => onSetIsAddingTopic(false)}>Cancel</button>
         </div>
       )}
+
+      {/* Global Search Bar */}
+      <div className="search-bar-strip">
+        <div className="search-bar-input-wrap">
+          <span className="search-bar-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </span>
+          <input
+            ref={searchInputRef}
+            type="text"
+            className="search-bar-input"
+            placeholder="Search references... (Ctrl+F)"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {hasActiveFilter && (
+            <button className="search-bar-clear" onClick={clearAllFilters} title="Clear all filters">&times;</button>
+          )}
+        </div>
+        <div className="search-filter-chips">
+          <button
+            className={`filter-chip ${filterHasNotes ? 'active' : ''}`}
+            onClick={() => setFilterHasNotes(prev => !prev)}
+          >Has notes</button>
+          <span className="filter-chip-group">
+            <input
+              type="number"
+              className="filter-year-input"
+              placeholder="Year min"
+              value={filterYearMin}
+              onChange={(e) => setFilterYearMin(e.target.value)}
+              min="1900"
+            />
+            <span className="filter-chip-sep">-</span>
+            <input
+              type="number"
+              className="filter-year-input"
+              placeholder="Year max"
+              value={filterYearMax}
+              onChange={(e) => setFilterYearMax(e.target.value)}
+              min="1900"
+            />
+          </span>
+          <input
+            type="number"
+            className="filter-citations-input"
+            placeholder="Min citations"
+            value={filterCitationsMin}
+            onChange={(e) => setFilterCitationsMin(e.target.value)}
+            min="0"
+          />
+        </div>
+      </div>
+
+      <div className="project-body">
+      {/* Collapsible Sidebar */}
+      <aside className={`sidebar ${sidebarExpanded ? 'expanded' : 'collapsed'}`}>
+        <button className="sidebar-toggle" onClick={() => setSidebarExpanded(prev => !prev)} title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}>
+          <span className={`sidebar-chevron ${sidebarExpanded ? '' : 'rotated'}`}>&#8249;</span>
+        </button>
+        {sidebarExpanded && (
+          <>
+            <div className="sidebar-section-label">Topics</div>
+            <ul className="sidebar-topic-list">
+              {topics.map(topic => (
+                <li key={topic.id} className="sidebar-topic-item" onClick={() => handleSidebarTopicClick(topic.id)}>
+                  <span className="sidebar-topic-dot" style={{ backgroundColor: topic.color || '#007bff' }}></span>
+                  <span className="sidebar-topic-name">{topic.name}</span>
+                  <span className="sidebar-topic-badge">{topic.references ? topic.references.length : 0}</span>
+                </li>
+              ))}
+              {topics.length === 0 && (
+                <li className="sidebar-empty">No topics yet</li>
+              )}
+            </ul>
+            <div className="sidebar-separator"></div>
+          </>
+        )}
+        {!sidebarExpanded && (
+          <ul className="sidebar-topic-list icon-only">
+            {topics.map(topic => (
+              <li key={topic.id} className="sidebar-topic-item" onClick={() => handleSidebarTopicClick(topic.id)} title={topic.name}>
+                <span className="sidebar-topic-dot" style={{ backgroundColor: topic.color || '#007bff' }}></span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </aside>
 
       <div
         className="canvas"
@@ -483,7 +744,18 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
         onMouseDown={handleCanvasMouseDown}
         onMouseMove={handleCanvasMouseMove}
         onMouseUp={handleCanvasMouseUp}
+        onAuxClick={(e) => e.preventDefault()}
+        style={{
+          backgroundSize: `${40 * zoom}px ${40 * zoom}px`,
+        }}
       >
+        <div
+          className="canvas-content"
+          style={{
+            transform: `scale(${zoom})`,
+            transformOrigin: '0 0',
+          }}
+        >
         {/* SVG layer for arrows */}
         <svg className="connections-layer">
           <defs>
@@ -526,10 +798,22 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
             <g>
               <path
                 d={(() => {
-                  const nodeRect = connectionStart.nodeElement.getBoundingClientRect();
-                  const workspaceRect = workspaceRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
-                  const centerStartX = nodeRect.left - workspaceRect.left + nodeRect.width / 2;
-                  const centerStartY = nodeRect.top - workspaceRect.top + nodeRect.height / 2;
+                  // Use canvas-space positions from getReferencePositions for accuracy at all zoom levels
+                  const positions = getReferencePositions();
+                  const startPos = positions[connectionStart.referenceId];
+                  let centerStartX, centerStartY;
+                  if (startPos) {
+                    centerStartX = startPos.x;
+                    centerStartY = startPos.y;
+                  } else {
+                    // Fallback: convert from screen-space
+                    const nodeRect = connectionStart.nodeElement.getBoundingClientRect();
+                    const workspaceRect = workspaceRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+                    const scrollLeft = workspaceRef.current?.scrollLeft || 0;
+                    const scrollTop = workspaceRef.current?.scrollTop || 0;
+                    centerStartX = (nodeRect.left - workspaceRect.left + scrollLeft + nodeRect.width / 2) / zoom;
+                    centerStartY = (nodeRect.top - workspaceRect.top + scrollTop + nodeRect.height / 2) / zoom;
+                  }
 
                   // If connection end is set, use fixed target position, otherwise follow mouse
                   let centerTargetX, centerTargetY;
@@ -577,13 +861,14 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
 
             if (sourcePos && targetPos) {
               return (
-                <g key={`${conn.id}-${arrowUpdateTrigger}`} style={{ pointerEvents: 'auto' }}>
+                <g key={`${conn.id}-${arrowUpdateTrigger}-${zoom}`} style={{ pointerEvents: 'auto' }}>
                   <ConnectionArrow
                     connection={conn}
                     sourcePos={sourcePos}
                     targetPos={targetPos}
                     onDelete={handleDeleteConnection}
                     onEdit={handleEditConnection}
+                    zoom={zoom}
                   />
                 </g>
               );
@@ -598,7 +883,10 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
             topic={topic}
             onUpdate={loadTopics}
             onOpenWebPanel={onOpenWebPanel}
+            onCloseWebPanel={onCloseWebPanel}
             isPanelOpen={isPanelOpen}
+            webPanelHidden={webPanelHidden}
+            onSetWebPanelHidden={onSetWebPanelHidden}
             onConnectionStart={handleConnectionStart}
             onConnectionEnd={handleConnectionEnd}
             isConnecting={isConnecting}
@@ -607,10 +895,13 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
             onSelect={handleTopicSelect}
             selectedTopics={selectedTopics}
             allTopics={topics}
+            zoom={zoom}
+            referenceMatchesFilter={referenceMatchesFilter}
+            webPanelRef={webPanelRef}
           />
         ))}
 
-        {/* Rectangle selection overlay */}
+        {/* Rectangle selection overlay (canvas-space, inside zoom transform) */}
         {isRectSelecting && (
           <div
             className="selection-rectangle"
@@ -622,18 +913,156 @@ function ProjectView({ project, onBack, onOpenWebPanel, isPanelOpen, onAddTopicS
             }}
           />
         )}
+        </div>{/* end canvas-content */}
       </div>
 
       {showConnectionModal && (
         <ConnectionModal
           onSave={editingConnection ? handleUpdateConnection : handleSaveConnection}
           onCancel={handleCancelConnection}
+          onDelete={editingConnection ? () => { handleDeleteConnection(editingConnection.id); setShowConnectionModal(false); setEditingConnection(null); } : undefined}
           initialDescription={editingConnection?.description || ''}
+          sourceTitle={editingConnection ? getReferenceTitleById(editingConnection.source_reference_id) : (connectionStart ? getReferenceTitleById(connectionStart.referenceId) : '')}
+          targetTitle={editingConnection ? getReferenceTitleById(editingConnection.target_reference_id) : (connectionEnd ? getReferenceTitleById(connectionEnd) : '')}
+          isEditing={!!editingConnection}
         />
       )}
 
-      <div className="citations-counter">
-        Total Citations: {getUniqueCitationsCount()}
+      {/* Minimap — rendered at 300×200, CSS-scaled to 150×100 normally */}
+      {(() => {
+        // Internal (hi-res) dimensions
+        const MM_W = 300;
+        const MM_H = 200;
+
+        // Read live positions from DOM for accurate minimap
+        void minimapTrigger; // depend on trigger for re-render
+        const liveTopics = topics.map(t => {
+          const el = workspaceRef.current?.querySelector(`[data-topic-id="${t.id}"]`);
+          if (el) {
+            return {
+              ...t,
+              position_x: parseFloat(el.style.left) || t.position_x,
+              position_y: parseFloat(el.style.top) || t.position_y,
+              grid_width: Math.round(el.offsetWidth / 40) || t.grid_width || 5,
+              grid_height: Math.round(el.offsetHeight / 40) || t.grid_height || 3,
+            };
+          }
+          return t;
+        });
+
+        let maxX = 2000, maxY = 2000;
+        liveTopics.forEach(t => {
+          const w = (t.grid_width || 5) * 40;
+          const h = (t.grid_height || 3) * 40;
+          maxX = Math.max(maxX, t.position_x + w + 100);
+          maxY = Math.max(maxY, t.position_y + h + 100);
+        });
+        const scaleX = MM_W / maxX;
+        const scaleY = MM_H / maxY;
+        const scale = Math.min(scaleX, scaleY);
+        const container = workspaceRef.current;
+
+        // Viewport rect in minimap coords
+        const viewX = container ? (scrollPos.left / zoom) * scale : 0;
+        const viewY = container ? (scrollPos.top / zoom) * scale : 0;
+        const viewW = container ? (container.clientWidth / zoom) * scale : MM_W;
+        const viewH = container ? (container.clientHeight / zoom) * scale : MM_H;
+
+        // Convert a mouse event on the minimap to minimap-internal coords
+        const minimapEventToCoords = (e, minimapEl) => {
+          const rect = minimapEl.getBoundingClientRect();
+          // The CSS renders at 300x200 but displays at a scaled size.
+          // getBoundingClientRect gives the displayed size, so compute the ratio.
+          const ratioX = MM_W / rect.width;
+          const ratioY = MM_H / rect.height;
+          return {
+            x: (e.clientX - rect.left) * ratioX,
+            y: (e.clientY - rect.top) * ratioY,
+          };
+        };
+
+        const scrollCanvasTo = (mmX, mmY) => {
+          if (!container) return;
+          const canvasX = mmX / scale;
+          const canvasY = mmY / scale;
+          container.scrollLeft = canvasX * zoom - container.clientWidth / 2;
+          container.scrollTop = canvasY * zoom - container.clientHeight / 2;
+        };
+
+        const handleMinimapMouseDown = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const minimapEl = e.currentTarget;
+          const coords = minimapEventToCoords(e, minimapEl);
+
+          // Check if clicking inside the viewport rect — start drag
+          const insideViewport =
+            coords.x >= viewX && coords.x <= viewX + viewW &&
+            coords.y >= viewY && coords.y <= viewY + viewH;
+
+          if (insideViewport) {
+            // Drag the viewport
+            const offsetX = coords.x - viewX;
+            const offsetY = coords.y - viewY;
+
+            const onMove = (moveE) => {
+              const moveCoords = minimapEventToCoords(moveE, minimapEl);
+              const newViewX = moveCoords.x - offsetX;
+              const newViewY = moveCoords.y - offsetY;
+              // Convert viewport top-left to canvas scroll
+              if (container) {
+                container.scrollLeft = (newViewX / scale) * zoom;
+                container.scrollTop = (newViewY / scale) * zoom;
+              }
+            };
+
+            const onUp = () => {
+              window.removeEventListener('mousemove', onMove);
+              window.removeEventListener('mouseup', onUp);
+            };
+
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          } else {
+            // Click outside viewport — jump to position
+            scrollCanvasTo(coords.x, coords.y);
+          }
+        };
+
+        return (
+          <div className="minimap" onMouseDown={handleMinimapMouseDown}>
+            <div className="minimap-inner">
+              {liveTopics.map(t => (
+                <div key={t.id} className="minimap-block" style={{
+                  left: `${t.position_x * scale}px`,
+                  top: `${t.position_y * scale}px`,
+                  width: `${(t.grid_width || 5) * 40 * scale}px`,
+                  height: `${(t.grid_height || 3) * 40 * scale}px`,
+                  backgroundColor: t.color || '#007bff',
+                }} />
+              ))}
+              <div className="minimap-viewport" style={{
+                left: `${viewX}px`,
+                top: `${viewY}px`,
+                width: `${viewW}px`,
+                height: `${viewH}px`,
+              }} />
+            </div>
+          </div>
+        );
+      })()}
+
+      </div>{/* end project-body */}
+
+      {/* Status bar */}
+      <div className="status-bar">
+        <span className="status-bar-left">{getTotalReferencesCount()} references</span>
+        <div className="zoom-controls">
+          <button className="zoom-btn" onClick={handleZoomOut} disabled={zoom <= ZOOM_MIN} title="Zoom out (Ctrl+-)">-</button>
+          <span className="zoom-level" onClick={handleZoomReset} title="Reset zoom (Ctrl+0)">{Math.round(zoom * 100)}%</span>
+          <button className="zoom-btn" onClick={handleZoomIn} disabled={zoom >= ZOOM_MAX} title="Zoom in (Ctrl++)">+</button>
+        </div>
+        <span className="status-bar-right"></span>
       </div>
     </div>
   );

@@ -50,7 +50,7 @@ def search_papers(query, search_type='title', limit=10):
                 'doi': work.get('doi', '').replace('https://doi.org/', '') if work.get('doi') else '',
                 'authors': authors_str,
                 'abstract': work.get('abstract', ''),
-                'year': pub_year,
+                'publication_year': pub_year,
                 'venue': work.get('primary_location', {}).get('source', {}).get('display_name', ''),
                 'citation_count': work.get('cited_by_count', 0),
                 'url': work.get('doi', '') or work.get('id', ''),
@@ -61,8 +61,7 @@ def search_papers(query, search_type='title', limit=10):
 
         return papers
 
-    except Exception as e:
-        print(f"Error searching papers: {e}")
+    except Exception:
         return []
 
 def get_paper_by_doi(doi):
@@ -98,7 +97,7 @@ def get_paper_by_doi(doi):
                 'doi': work.get('doi', '').replace('https://doi.org/', '') if work.get('doi') else '',
                 'authors': authors_str,
                 'abstract': work.get('abstract', ''),
-                'year': work.get('publication_year', ''),
+                'publication_year': work.get('publication_year', ''),
                 'venue': work.get('primary_location', {}).get('source', {}).get('display_name', ''),
                 'citation_count': work.get('cited_by_count', 0),
                 'url': work.get('doi', '') or work.get('id', ''),
@@ -108,6 +107,6 @@ def get_paper_by_doi(doi):
 
         return None
 
-    except Exception as e:
-        print(f"Error fetching paper by DOI: {e}")
+    except Exception:
         return None
+

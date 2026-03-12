@@ -1,6 +1,5 @@
 import sqlite3
 import os
-from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'database', 'references.db')
 
@@ -81,6 +80,12 @@ def init_database():
     except sqlite3.OperationalError:
         pass
 
+    # Add sort_order column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute('ALTER TABLE paper_references ADD COLUMN sort_order INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass
+
     # Reference connections table (for arrows between references)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS reference_connections (
@@ -100,5 +105,6 @@ def init_database():
 def get_connection():
     """Get a database connection"""
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     return conn

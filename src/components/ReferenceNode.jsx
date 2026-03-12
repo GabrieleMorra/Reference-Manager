@@ -12,7 +12,7 @@ const darkenColor = (color, percent) => {
   return "#" + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
 };
 
-function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, projectId, isPanelOpen, topicColor = '#007bff', onConnectionStart, onConnectionEnd, isConnecting }) {
+function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, projectId, isPanelOpen, topicColor = '#007bff', onConnectionStart, onConnectionEnd, isConnecting, zoom = 1, dimmed = false, onReorderStart, isBeingDragged = false }) {
   const borderColor = darkenColor(topicColor, 20);
   const [showDetails, setShowDetails] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
@@ -308,6 +308,15 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
   };
 
   const handleMouseDown = (e) => {
+    // Middle-click: start reorder drag
+    if (e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (onReorderStart) {
+        onReorderStart(reference.id, e);
+      }
+      return;
+    }
     if (e.button === 0 && onConnectionStart) {  // Left mouse button
       e.stopPropagation();
       e.preventDefault();
@@ -325,6 +334,10 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
   };
 
   const handleMouseUp = (e) => {
+    if (e.button === 1) {
+      e.stopPropagation();
+      return;
+    }
     // Cancel connection start if mouse is released before 150ms
     if (connectionStartTimeoutRef.current) {
       clearTimeout(connectionStartTimeoutRef.current);
@@ -348,7 +361,7 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
     <>
       <div
         ref={nodeRef}
-        className={`reference-node ${isConnecting ? 'connecting' : ''}`}
+        className={`reference-node ${isConnecting ? 'connecting' : ''} ${dimmed ? 'dimmed' : ''} ${isBeingDragged ? 'reorder-dragging' : ''}`}
         style={{
           borderColor: borderColor,
           '--hover-bg-color': topicColor
@@ -369,6 +382,8 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
           style={{
             top: `${tooltipPosition.top}px`,
             left: `${tooltipPosition.left}px`,
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top left',
           }}
           onMouseEnter={handleTooltipMouseEnter}
           onMouseLeave={handleTooltipMouseLeave}
@@ -433,11 +448,13 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
             position: 'fixed',
             left: `${contextMenuPosition.x}px`,
             top: `${contextMenuPosition.y}px`,
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top left',
           }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="context-menu-section">
-            <div className="context-menu-header">Sposta in...</div>
+            <div className="context-menu-header">Move to...</div>
             {availableTopics.length > 0 ? (
               availableTopics.map((topic) => (
                 <button
@@ -449,12 +466,12 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
                 </button>
               ))
             ) : (
-              <div className="context-menu-empty">Nessun altro argomento disponibile</div>
+              <div className="context-menu-empty">No other topics available</div>
             )}
           </div>
           <div className="context-menu-divider"></div>
           <div className="context-menu-section">
-            <div className="context-menu-header">Duplica in...</div>
+            <div className="context-menu-header">Duplicate to...</div>
             {availableTopics.length > 0 ? (
               availableTopics.map((topic) => (
                 <button
@@ -466,7 +483,7 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
                 </button>
               ))
             ) : (
-              <div className="context-menu-empty">Nessun altro argomento disponibile</div>
+              <div className="context-menu-empty">No other topics available</div>
             )}
           </div>
           <div className="context-menu-divider"></div>
@@ -479,7 +496,7 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
                 setIsEditing(true);
               }}
             >
-              Modifica
+              Edit
             </button>
             <button
               className="context-menu-item context-menu-delete"
@@ -488,7 +505,7 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
                 handleDelete();
               }}
             >
-              Elimina
+              Delete
             </button>
           </div>
         </div>,
