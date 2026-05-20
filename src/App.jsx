@@ -123,6 +123,33 @@ function App() {
     downloadFile(lines.join('\n'), `${safeFilename(currentProject.title)}_references.md`, 'text/markdown');
   };
 
+  const handleExportPdfs = async () => {
+    if (!currentProject) return;
+    setShowExportMenu(false);
+    try {
+      const response = await fetch(`http://localhost:5000/api/projects/${currentProject.id}/export/pdfs`);
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        alert(err.error || 'Failed to export PDFs');
+        return;
+      }
+      const count = response.headers.get('X-PDF-Count') || '';
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${safeFilename(currentProject.title)}_pdfs.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      if (count) alert(`Exported ${count} PDF${count === '1' ? '' : 's'}`);
+    } catch (error) {
+      console.error('Failed to export PDFs:', error);
+      alert('Failed to export PDFs');
+    }
+  };
+
   const handleExportBibliography = async () => {
     if (!currentProject) return;
     try {
@@ -178,6 +205,7 @@ function App() {
                     <button onClick={handleExportBibliography}>BibTeX (.bib)</button>
                     <button onClick={handleExportCSV}>CSV (.csv)</button>
                     <button onClick={handleExportMarkdown}>Markdown (.md)</button>
+                    <button onClick={handleExportPdfs}>All PDFs (.zip)</button>
                     <button onClick={() => { setShowExportMenu(false); setShowReportModal(true); }}>Report</button>
                   </div>
                 )}

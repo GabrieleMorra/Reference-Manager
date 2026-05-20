@@ -2,7 +2,85 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import TopicBlock from './TopicBlock';
 import ConnectionArrow from './ConnectionArrow';
 import ConnectionModal from './ConnectionModal';
+import { cleanBibTeXText } from '../bibtex';
 import './ProjectView.css';
+
+// Extract a surname from a single author string. Two common forms:
+//   "Morra, Gabriele"           → surname is the part before the comma → "Morra"
+//   "Gabriele Morra"            → surname is the last whitespace token → "Morra"
+//   "Morra"                     → just the surname → "Morra"
+function surnameOf(author) {
+  let s = (author || '').trim();
+  if (!s) return '';
+  // Strip trailing "et al." / "et al" so it doesn't get parsed as a surname
+  s = s.replace(/[,;\s]+et\s+al\.?$/i, '').trim();
+  if (s.includes(',')) {
+    // "Last, First" — keep the part before the first comma
+    return s.split(',')[0].trim();
+  }
+  // "First Last" — last whitespace-separated token
+  const tokens = s.split(/\s+/);
+  return tokens[tokens.length - 1];
+}
+
+// Heuristic: a corporate / institutional author (e.g. "U.S. Air Force",
+// "National Aeronautics and Space Administration", "US Department of
+// Defense"). In that case the full name should be kept, not parsed as
+// "Surname, Given Name".
+function looksLikeOrganization(s) {
+  if (!s) return false;
+  // BibTeX/manual personal-author lists always carry either a "Last, First"
+  // comma or a ';' separator. If neither is present, it's likely a single
+  // organisation name.
+  if (s.includes(',') || s.includes(';')) return false;
+  // Trigger words that strongly suggest an institutional author
+  const orgWords = /\b(university|institute|department|agency|administration|laboratory|labs?|center|centre|force|navy|army|command|corporation|company|inc\.?|ltd\.?|society|association|council|committee|commission|office|bureau|ministry|government|foundation|group|organisation|organization|national|international|federal)\b/i;
+  if (orgWords.test(s)) return true;
+  // No commas, several words, no " and " surrounded by personal-name pieces:
+  // treat as organisation if it has 3+ words. Personal "First Middle Last"
+  // is the only false positive — still acceptable, surname == last word.
+  // Keep "First Last" (2 words) and single names parsed as personal.
+  return false;
+}
+
+// Render "First-author-surname et al., YYYY" for the sidebar reference rows.
+// Handles BibTeX "Last, First and Last, First and …", semicolon-separated
+// and comma-separated lists, plus corporate authors.
+function formatRefAuthorYear(ref) {
+  const year = ref.publication_year || '';
+  const raw = cleanBibTeXText((ref.authors || '').trim());
+  let first = '';
+
+  if (raw) {
+    // Corporate / institutional author → show the whole name as-is.
+    if (looksLikeOrganization(raw)) {
+      first = raw;
+    } else {
+      // Decide author separator. BibTeX uses " and ", many editors use ";".
+      // Plain "," is ambiguous because it's also the "Last, First" separator,
+      // so we only split on "," when neither " and " nor ";" is present.
+      let parts;
+      if (/\s+and\s+/i.test(raw)) {
+        parts = raw.split(/\s+and\s+/i);
+      } else if (raw.includes(';')) {
+        parts = raw.split(';');
+      } else if ((raw.match(/,/g) || []).length >= 2) {
+        // Plain "A, B, C" list — split on every comma
+        parts = raw.split(',');
+      } else {
+        // Either a single author "Last, First" or a single name
+        parts = [raw];
+      }
+
+      first = surnameOf(parts[0]);
+      const hasMore = parts.length > 1 && parts.slice(1).some(p => p.trim().length > 0);
+      if (hasMore) first = `${first} et al.`;
+    }
+  }
+
+  if (first && year) return `${first}, ${year}`;
+  return first || (year ? String(year) : '');
+}
 
 const TOPIC_COLORS = [
   '#007bff', // Blue
@@ -16,6 +94,15 @@ const TOPIC_COLORS = [
 
 function ProjectView({ project, onOpenWebPanel, onCloseWebPanel, isPanelOpen, isAddingTopic, onSetIsAddingTopic, webPanelRef, webPanelHidden, onSetWebPanelHidden }) {
   const [topics, setTopics] = useState([]);
+  // Which topic trees in the sidebar are currently expanded
+  const [expandedSidebarTopics, setExpandedSidebarTopics] = useState(new Set());
+  // Drag-over highlight for sidebar references receiving a PDF drop
+  const [pdfDropTargetRef, setPdfDropTargetRef] = useState(null);
+  // Reference id awaiting a PDF picked through the hidden file input
+  const [pdfPickerRefId, setPdfPickerRefId] = useState(null);
+  const sidebarPdfInputRef = useRef(null);
+  // Which canvas reference-node we are currently faking-hover from the sidebar
+  const hoveredCanvasRefRef = useRef(null);
   const [newTopicName, setNewTopicName] = useState('');
   const [selectedColor, setSelectedColor] = useState(TOPIC_COLORS[0]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -419,6 +506,163 @@ function ProjectView({ project, onOpenWebPanel, onCloseWebPanel, isPanelOpen, is
     }
   };
 
+  const toggleSidebarTopicExpanded = (topicId, e) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    setExpandedSidebarTopics(prev => {
+      const next = new Set(prev);
+      if (next.has(topicId)) next.delete(topicId);
+      else next.add(topicId);
+      return next;
+    });
+  };
+
+  // Open the PDF attached to a reference inside the WebPanel
+  const handleSidebarOpenReferencePdf = (ref, e) => {
+    if (e) e.stopPropagation();
+    if (!ref || !ref.pdf_path) return;
+    if (onOpenWebPanel) {
+      onOpenWebPanel(`http://localhost:5000/api/references/${ref.id}/pdf-view`);
+    }
+  };
+
+  // Drag-and-drop PDF onto a reference row in the sidebar → upload as
+  // attachment for that reference. Mirrors the "Add PDF" context menu action.
+  const handleSidebarRefDragOver = (refId, e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setPdfDropTargetRef(refId);
+  };
+
+  const handleSidebarRefDragLeave = (refId, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPdfDropTargetRef(prev => (prev === refId ? null : prev));
+  };
+
+  const uploadPdfForReference = async (refId, file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Only PDF files are accepted.');
+      return;
+    }
+    try {
+      const fd = new FormData();
+      fd.append('pdf', file);
+      const response = await fetch(`http://localhost:5000/api/references/${refId}/pdf`, {
+        method: 'POST',
+        body: fd,
+      });
+      if (response.ok) {
+        loadTopics();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        alert(`Failed to attach PDF: ${err.error || response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Failed to upload PDF:', error);
+      alert('Failed to upload PDF');
+    }
+  };
+
+  const handleSidebarRefDrop = (refId, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setPdfDropTargetRef(null);
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    uploadPdfForReference(refId, file);
+  };
+
+  // Click on a reference without a PDF → open the OS file picker so the
+  // user can attach one. Same upload flow as drag-and-drop.
+  const handleSidebarRefAddPdfClick = (refId, e) => {
+    if (e) e.stopPropagation();
+    setPdfPickerRefId(refId);
+    if (sidebarPdfInputRef.current) {
+      sidebarPdfInputRef.current.value = '';
+      sidebarPdfInputRef.current.click();
+    }
+  };
+
+  // Hovering a reference row in the sidebar should highlight the matching
+  // ReferenceNode on the canvas: scroll it into view, make the parent topic
+  // expanded if needed, then fire a synthetic mouseenter so the existing
+  // tooltip + scale-up effect of ReferenceNode triggers exactly as if the
+  // user were hovering the dot itself.
+  // React's synthetic onMouseEnter/onMouseLeave are derived from the native
+  // mouseover/mouseout pair (these bubble, mouseenter/leave do not). So to
+  // make React's handlers run on a remote element we dispatch the bubbling
+  // pair with the correct relatedTarget.
+  const fireMouseOver = (el) => {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const evt = new MouseEvent('mouseover', {
+      bubbles: true, cancelable: true, view: window,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      relatedTarget: null,
+    });
+    el.dispatchEvent(evt);
+  };
+
+  const fireMouseOut = (el) => {
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const evt = new MouseEvent('mouseout', {
+      bubbles: true, cancelable: true, view: window,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+      relatedTarget: document.body,
+    });
+    el.dispatchEvent(evt);
+  };
+
+  const handleSidebarRefHoverEnter = (refId) => {
+    const el = document.querySelector(`[data-reference-id="${refId}"]`);
+    if (!el) return;
+
+    // If we were already highlighting another dot, leave it first
+    if (hoveredCanvasRefRef.current && hoveredCanvasRefRef.current !== el) {
+      hoveredCanvasRefRef.current.classList.remove('force-hover');
+      fireMouseOut(hoveredCanvasRefRef.current);
+    }
+    hoveredCanvasRefRef.current = el;
+
+    // Bring the topic block (and the dot inside it) into view
+    const topicEl = el.closest('.topic-block');
+    if (topicEl) {
+      topicEl.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    }
+
+    // CSS :hover is driven by the real cursor — add a class so the same
+    // visual effect kicks in for our synthetic highlight.
+    el.classList.add('force-hover');
+    fireMouseOver(el);
+  };
+
+  const handleSidebarRefHoverLeave = (refId) => {
+    const el = hoveredCanvasRefRef.current
+      || document.querySelector(`[data-reference-id="${refId}"]`);
+    if (el) {
+      el.classList.remove('force-hover');
+      fireMouseOut(el);
+    }
+    if (hoveredCanvasRefRef.current === el) hoveredCanvasRefRef.current = null;
+  };
+
+  const handleSidebarPdfPicked = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    const refId = pdfPickerRefId;
+    e.target.value = '';
+    setPdfPickerRefId(null);
+    if (!file || !refId) return;
+    await uploadPdfForReference(refId, file);
+  };
+
   const getTotalReferencesCount = () => {
     let count = 0;
     topics.forEach(t => { if (t.references) count += t.references.length; });
@@ -703,6 +947,15 @@ function ProjectView({ project, onOpenWebPanel, onCloseWebPanel, isPanelOpen, is
         </div>
       </div>
 
+      {/* Hidden file input used when clicking a no-PDF reference in the sidebar */}
+      <input
+        ref={sidebarPdfInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        style={{ display: 'none' }}
+        onChange={handleSidebarPdfPicked}
+      />
+
       <div className="project-body">
       {/* Collapsible Sidebar */}
       <aside className={`sidebar ${sidebarExpanded ? 'expanded' : 'collapsed'}`}>
@@ -713,13 +966,78 @@ function ProjectView({ project, onOpenWebPanel, onCloseWebPanel, isPanelOpen, is
           <>
             <div className="sidebar-section-label">Topics</div>
             <ul className="sidebar-topic-list">
-              {topics.map(topic => (
-                <li key={topic.id} className="sidebar-topic-item" onClick={() => handleSidebarTopicClick(topic.id)}>
-                  <span className="sidebar-topic-dot" style={{ backgroundColor: topic.color || '#007bff' }}></span>
-                  <span className="sidebar-topic-name">{topic.name}</span>
-                  <span className="sidebar-topic-badge">{topic.references ? topic.references.length : 0}</span>
-                </li>
-              ))}
+              {topics.map(topic => {
+                const isExpanded = expandedSidebarTopics.has(topic.id);
+                const refs = topic.references || [];
+                return (
+                  <li key={topic.id} className="sidebar-topic-group">
+                    <div
+                      className={`sidebar-topic-item ${isExpanded ? 'expanded' : ''}`}
+                      onClick={(e) => toggleSidebarTopicExpanded(topic.id, e)}
+                      onDoubleClick={() => handleSidebarTopicClick(topic.id)}
+                      title="Click to expand · Double-click to jump on canvas"
+                      style={{ '--topic-color': topic.color || '#007bff' }}
+                    >
+                      <span
+                        className={`sidebar-topic-chevron ${isExpanded ? 'open' : ''}`}
+                        aria-hidden="true"
+                      >&#9654;</span>
+                      <span className="sidebar-topic-dot" style={{ backgroundColor: topic.color || '#007bff' }}></span>
+                      <span className="sidebar-topic-name">{topic.name}</span>
+                      <span className="sidebar-topic-badge">{refs.length}</span>
+                    </div>
+
+                    {isExpanded && (
+                      <ul className="sidebar-ref-list">
+                        {refs.length === 0 && (
+                          <li className="sidebar-ref-empty">No references</li>
+                        )}
+                        {refs.map(ref => {
+                          const hasPdf = !!ref.pdf_path;
+                          const isDropTarget = pdfDropTargetRef === ref.id;
+                          return (
+                            <li
+                              key={ref.id}
+                              className={`sidebar-ref-item ${hasPdf ? 'has-pdf' : 'no-pdf'} ${isDropTarget ? 'pdf-drop-target' : ''}`}
+                              onClick={hasPdf
+                                ? (e) => handleSidebarOpenReferencePdf(ref, e)
+                                : (e) => handleSidebarRefAddPdfClick(ref.id, e)}
+                              onMouseEnter={() => handleSidebarRefHoverEnter(ref.id)}
+                              onMouseLeave={() => handleSidebarRefHoverLeave(ref.id)}
+                              onDragOver={(e) => handleSidebarRefDragOver(ref.id, e)}
+                              onDragEnter={(e) => handleSidebarRefDragOver(ref.id, e)}
+                              onDragLeave={(e) => handleSidebarRefDragLeave(ref.id, e)}
+                              onDrop={(e) => handleSidebarRefDrop(ref.id, e)}
+                            >
+                              <span
+                                className={`sidebar-ref-pdf-icon ${hasPdf ? '' : 'missing'}`}
+                                aria-hidden="true"
+                              >
+                                <svg viewBox="0 0 24 24" width="18" height="18">
+                                  <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z" fill="currentColor"/>
+                                  <path d="M14 2v6h6" fill="rgba(255,255,255,0.35)"/>
+                                  <text x="12" y="17" textAnchor="middle" fontSize="6.5" fontWeight="700" fill="#fff" fontFamily="Arial, sans-serif">PDF</text>
+                                </svg>
+                              </span>
+                              <div className="sidebar-ref-body">
+                                <div className="sidebar-ref-title">{cleanBibTeXText(ref.title)}</div>
+                                <div className="sidebar-ref-meta">
+                                  <span className="sidebar-ref-author-year">
+                                    {formatRefAuthorYear(ref)}
+                                  </span>
+                                  <span className="sidebar-ref-citations">
+                                    {ref.citation_count || 0} cit
+                                  </span>
+                                </div>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
               {topics.length === 0 && (
                 <li className="sidebar-empty">No topics yet</li>
               )}

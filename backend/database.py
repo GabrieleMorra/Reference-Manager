@@ -86,6 +86,12 @@ def init_database():
     except sqlite3.OperationalError:
         pass
 
+    # Add pdf_path column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute('ALTER TABLE paper_references ADD COLUMN pdf_path TEXT')
+    except sqlite3.OperationalError:
+        pass
+
     # Reference connections table (for arrows between references)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS reference_connections (

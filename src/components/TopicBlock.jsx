@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import ReferenceNode from './ReferenceNode';
+import { cleanBibTeXText, extractBibtexField } from '../bibtex';
 import './TopicBlock.css';
 
 function TopicBlock({ topic, onUpdate, onOpenWebPanel, onCloseWebPanel, isPanelOpen, webPanelHidden, onSetWebPanelHidden, onConnectionStart, onConnectionEnd, isConnecting, onPositionChange, isSelected, onSelect, selectedTopics, allTopics, zoom = 1, referenceMatchesFilter, webPanelRef }) {
@@ -814,6 +815,7 @@ function TopicBlock({ topic, onUpdate, onOpenWebPanel, onCloseWebPanel, isPanelO
             dimmed={referenceMatchesFilter ? !referenceMatchesFilter(reference) : false}
             onReorderStart={handleReorderStart}
             isBeingDragged={reorderDragId === reference.id}
+            onOpenWebPanel={onOpenWebPanel}
           />
         ))}
         {/* Insertion bar indicator */}
@@ -889,6 +891,53 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, onCloseW
     publication_year: null,
     bibtex: '',
   });
+  // PDF attachment state — kept until the reference is actually created
+  const [pdfFile, setPdfFile] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const pdfInputRef = useRef(null);
+
+  const handlePickPdf = () => {
+    if (pdfInputRef.current) pdfInputRef.current.click();
+  };
+
+  const handlePdfChange = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Only PDF files are accepted.');
+      e.target.value = '';
+      return;
+    }
+    setPdfFile(file);
+    e.target.value = '';
+  };
+
+  const handlePdfDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Only PDF files are accepted.');
+      return;
+    }
+    setPdfFile(file);
+  };
+
+  const handleDragOver = (e) => {
+    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
 
   const handleAutoAdd = async () => {
     if (!searchQuery.trim()) return;
@@ -995,8 +1044,8 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, onCloseW
 
         // Parse author and year from BibTeX (more accurate than Scholar scrape)
         if (details.bibtex) {
-          const authorMatch = details.bibtex.match(/author\s*=\s*\{([^}]+)\}/i);
-          if (authorMatch) updates.authors = authorMatch[1].trim();
+          const author = extractBibtexField(details.bibtex, 'author');
+          if (author) updates.authors = cleanBibTeXText(author);
 
           const yearMatch = details.bibtex.match(/year\s*=\s*\{(\d{4})\}/i);
           if (yearMatch) updates.publication_year = parseInt(yearMatch[1]);
@@ -1016,11 +1065,24 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, onCloseW
     if (!formData.title.trim()) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/topics/${topicId}/references`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
+      let response;
+      if (pdfFile) {
+        const fd = new FormData();
+        Object.entries(formData).forEach(([k, v]) => {
+          fd.append(k, v === null || v === undefined ? '' : String(v));
+        });
+        fd.append('pdf', pdfFile);
+        response = await fetch(`http://localhost:5000/api/topics/${topicId}/references/with-pdf`, {
+          method: 'POST',
+          body: fd,
+        });
+      } else {
+        response = await fetch(`http://localhost:5000/api/topics/${topicId}/references`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData),
+        });
+      }
 
       if (response.ok) {
         onAdded();
@@ -1034,13 +1096,18 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, onCloseW
     setFormData({ ...formData, [field]: value });
   };
 
-  // Search mode - initial view
+  // Search mode - initial view (no PDF attachment options here — the user
+  // can attach a PDF only after committing to a paper via Search or Add
+  // Manually, so they can see the full set of fields they're filling in).
   if (mode === 'search') {
     return createPortal(
       <>
         <div className="modal-backdrop" onClick={onCancel} />
-        <div className={`reference-search ${isPanelOpen ? 'with-panel' : ''}`} onClick={(e) => e.stopPropagation()}>
-          <h4>Search for Paper</h4>
+        <div
+          className={`reference-search ${isPanelOpen ? 'with-panel' : ''}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h4>Add Reference</h4>
           <div className="search-controls">
             <input
               type="text"
@@ -1144,7 +1211,16 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, onCloseW
 
   // Form mode - manual input (possibly pre-filled from auto-add)
   return createPortal(
-    <div className={`reference-form ${isPanelOpen ? 'with-panel' : ''} ${isFetchingDetails ? 'fetching' : ''}`} onClick={(e) => e.stopPropagation()}>
+    <>
+      <div className="modal-backdrop" onClick={onCancel} />
+      <div
+        className={`reference-form ${isPanelOpen ? 'with-panel' : ''} ${isFetchingDetails ? 'fetching' : ''} ${isDragOver ? 'pdf-drag-over' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+        onDragOver={handleDragOver}
+        onDragEnter={handleDragOver}
+        onDragLeave={handleDragLeave}
+      onDrop={handlePdfDrop}
+    >
       <h4>Add Reference{isFetchingDetails ? ' — fetching details...' : ''}</h4>
       <form onSubmit={handleSubmit}>
         <input
@@ -1200,13 +1276,56 @@ function NewReferenceForm({ topicId, onCancel, onAdded, onOpenWebPanel, onCloseW
           onChange={(e) => handleChange('notes', e.target.value)}
           rows="2"
         />
+
+        {pdfFile && (
+          <div className="pdf-attachment-row">
+            <span className="pdf-attachment-icon" aria-hidden="true">📄</span>
+            <span className="pdf-attachment-name" title={pdfFile.name}>{pdfFile.name}</span>
+            <button
+              type="button"
+              className="pdf-attachment-remove"
+              onClick={() => setPdfFile(null)}
+              title="Remove PDF"
+            >×</button>
+          </div>
+        )}
+
+        <div className="pdf-drop-hint">Drop a PDF anywhere on this dialog to attach it.</div>
+
+        <input
+          ref={pdfInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          style={{ display: 'none' }}
+          onChange={handlePdfChange}
+        />
+
         <div className="form-buttons">
+          {/* Cancel is isolated on the left so it can't be misclicked next
+              to the primary commit. Back to Search / Add PDF / Add Reference
+              form a left-to-right progression on the right side:
+              navigate back → attach optional asset → commit. */}
+          <button type="button" className="form-cancel-btn" onClick={onCancel}>Cancel</button>
+          <button type="button" className="form-back-btn" onClick={() => setMode('search')}>Back to Search</button>
+          <button type="button" className="pdf-add-btn" onClick={handlePickPdf}>
+            <svg
+              className="pdf-add-btn-icon"
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              aria-hidden="true"
+            >
+              <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z" fill="#d93025"/>
+              <path d="M14 2v6h6" fill="rgba(255,255,255,0.35)"/>
+              <text x="12" y="17" textAnchor="middle" fontSize="6.5" fontWeight="700" fill="#fff" fontFamily="Arial, sans-serif">PDF</text>
+            </svg>
+            <span>{pdfFile ? 'Replace PDF' : 'Add PDF'}</span>
+          </button>
           <button type="submit">Add Reference</button>
-          <button type="button" onClick={() => setMode('search')}>Back to Search</button>
-          <button type="button" onClick={onCancel}>Cancel</button>
         </div>
       </form>
-    </div>,
+      </div>
+    </>,
     document.body
   );
 }

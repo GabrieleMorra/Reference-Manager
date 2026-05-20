@@ -71,6 +71,24 @@ def reorder_references(topic_id, reference_ids):
     conn.close()
     return True
 
+def set_reference_pdf(reference_id, pdf_path):
+    """Set the PDF path for a reference (relative path inside the pdf storage dir, or None to clear)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE paper_references SET pdf_path = ? WHERE id = ?', (pdf_path, reference_id))
+    conn.commit()
+    conn.close()
+    return True
+
+def get_reference_by_id(reference_id):
+    """Get a single reference by id"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM paper_references WHERE id = ?', (reference_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
 def duplicate_reference(reference_id, target_topic_id):
     """Duplicate a reference to another topic"""
     conn = get_connection()

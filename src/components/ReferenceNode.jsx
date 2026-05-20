@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { cleanBibTeXText } from '../bibtex';
 import './ReferenceNode.css';
 
 // Helper function to darken a color
@@ -12,7 +13,7 @@ const darkenColor = (color, percent) => {
   return "#" + (0x1000000 + (R<255?R<1?0:R:255)*0x10000 + (G<255?G<1?0:G:255)*0x100 + (B<255?B<1?0:B:255)).toString(16).slice(1);
 };
 
-function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, projectId, isPanelOpen, topicColor = '#007bff', onConnectionStart, onConnectionEnd, isConnecting, zoom = 1, dimmed = false, onReorderStart, isBeingDragged = false }) {
+function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, projectId, isPanelOpen, topicColor = '#007bff', onConnectionStart, onConnectionEnd, isConnecting, zoom = 1, dimmed = false, onReorderStart, isBeingDragged = false, onOpenWebPanel }) {
   const borderColor = darkenColor(topicColor, 20);
   const [showDetails, setShowDetails] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
@@ -36,6 +37,7 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
   const contextMenuRef = useRef(null);
   const hideTimeoutRef = useRef(null);
   const connectionStartTimeoutRef = useRef(null);
+  const pdfInputRef = useRef(null);
 
   useEffect(() => {
     // Load available topics when context menu is shown
@@ -204,6 +206,88 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
     }
   };
 
+  const handleAddPdfClick = () => {
+    setShowContextMenu(false);
+    if (pdfInputRef.current) {
+      pdfInputRef.current.value = '';
+      pdfInputRef.current.click();
+    }
+  };
+
+  const handlePdfFileSelected = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Only PDF files are accepted.');
+      return;
+    }
+    try {
+      const fd = new FormData();
+      fd.append('pdf', file);
+      const response = await fetch(`http://localhost:5000/api/references/${reference.id}/pdf`, {
+        method: 'POST',
+        body: fd,
+      });
+      if (response.ok) {
+        if (onUpdate) onUpdate();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        alert(`Failed to attach PDF: ${err.error || response.statusText}`);
+      }
+    } catch (error) {
+      console.error('Failed to upload PDF:', error);
+      alert('Failed to upload PDF');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  // Resolve a stored DOI (which may be a bare "10.x/yyy" id or a full URL)
+  // to a navigable URL. Anything that already starts with http(s) is kept
+  // as-is so non-DOI links saved in the field still work.
+  const resolveDoiUrl = (doi) => {
+    const v = (doi || '').trim();
+    if (!v) return '';
+    if (/^https?:\/\//i.test(v)) return v;
+    return `https://doi.org/${v.replace(/^doi:\s*/i, '')}`;
+  };
+
+  const openLinkInWebPanel = (url, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!url) return;
+    if (onOpenWebPanel) onOpenWebPanel(url);
+    else window.open(url, '_blank');
+  };
+
+  const handleOpenPdf = () => {
+    // Open the PDF inside the existing WebPanel (Chromium <webview>). We use
+    // a tiny HTML wrapper (pdf-view) that sets <title> to the reference
+    // title — that way the panel header (which listens to page-title-updated)
+    // shows the paper title instead of the random storage filename.
+    const url = `http://localhost:5000/api/references/${reference.id}/pdf-view`;
+    if (onOpenWebPanel) {
+      onOpenWebPanel(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleRemovePdf = async () => {
+    const confirmed = window.confirm('Remove the attached PDF from this reference?');
+    if (!confirmed) return;
+    try {
+      const response = await fetch(`http://localhost:5000/api/references/${reference.id}/pdf`, {
+        method: 'DELETE',
+      });
+      if (response.ok && onUpdate) onUpdate();
+    } catch (error) {
+      console.error('Failed to remove PDF:', error);
+    }
+  };
+
   const handleDelete = async () => {
     const confirmed = window.confirm(
       `Are you sure you want to delete "${reference.title}"?\n\nThis action cannot be undone.`
@@ -245,6 +329,9 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
         setIsEditing(false);
         setShowDetails(false);
         onUpdate();
+        // Also refresh the parent (sidebar tree + citation stats) so the
+        // updated title/authors/year/citations show up everywhere.
+        if (onUpdateAll) onUpdateAll();
       }
     } catch (error) {
       console.error('Failed to update reference:', error);
@@ -361,6 +448,7 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
     <>
       <div
         ref={nodeRef}
+        data-reference-id={reference.id}
         className={`reference-node ${isConnecting ? 'connecting' : ''} ${dimmed ? 'dimmed' : ''} ${isBeingDragged ? 'reorder-dragging' : ''}`}
         style={{
           borderColor: borderColor,
@@ -388,12 +476,12 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
           onMouseEnter={handleTooltipMouseEnter}
           onMouseLeave={handleTooltipMouseLeave}
         >
-          <div className="tooltip-title">{reference.title}</div>
+          <div className="tooltip-title">{cleanBibTeXText(reference.title)}</div>
 
           {reference.authors && (
             <div className="tooltip-field">
               <label>Authors:</label>
-              <span>{reference.authors}</span>
+              <span>{cleanBibTeXText(reference.authors)}</span>
             </div>
           )}
 
@@ -415,10 +503,8 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
             <div className="tooltip-field">
               <label>DOI:</label>
               <a
-                href={reference.doi}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
+                href={resolveDoiUrl(reference.doi)}
+                onClick={(e) => openLinkInWebPanel(resolveDoiUrl(reference.doi), e)}
               >
                 {reference.doi}
               </a>
@@ -488,6 +574,35 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
           </div>
           <div className="context-menu-divider"></div>
           <div className="context-menu-section">
+            {reference.pdf_path ? (
+              <>
+                <button
+                  className="context-menu-item"
+                  onClick={() => { setShowContextMenu(false); handleOpenPdf(); }}
+                >
+                  Open PDF
+                </button>
+                <button
+                  className="context-menu-item"
+                  onClick={handleAddPdfClick}
+                >
+                  Replace PDF
+                </button>
+                <button
+                  className="context-menu-item"
+                  onClick={() => { setShowContextMenu(false); handleRemovePdf(); }}
+                >
+                  Remove PDF
+                </button>
+              </>
+            ) : (
+              <button
+                className="context-menu-item"
+                onClick={handleAddPdfClick}
+              >
+                Add PDF
+              </button>
+            )}
             <button
               className="context-menu-item"
               onClick={() => {
@@ -512,11 +627,20 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
         document.body
       )}
 
+      {/* Hidden file input used to attach a PDF to this reference */}
+      <input
+        ref={pdfInputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        style={{ display: 'none' }}
+        onChange={handlePdfFileSelected}
+      />
+
       {showDetails && createPortal(
         <div className="reference-modal-overlay" onClick={handleCloseModal}>
           <div className={`reference-modal ${isPanelOpen ? 'with-panel' : ''}`} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{isEditing ? 'Edit Reference' : reference.title}</h3>
+              <h3>{isEditing ? 'Edit Reference' : cleanBibTeXText(reference.title)}</h3>
               <div className="modal-header-actions">
                 {!isEditing && (
                   <button className="delete-btn" onClick={handleDelete} title="Delete reference">
@@ -619,7 +743,7 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
                   {reference.authors && (
                     <div className="field">
                       <label>Authors</label>
-                      <p>{reference.authors}</p>
+                      <p>{cleanBibTeXText(reference.authors)}</p>
                     </div>
                   )}
 
@@ -642,10 +766,8 @@ function ReferenceNode({ reference, onUpdate, onUpdateAll, currentTopicId, proje
                       <label>DOI</label>
                       <p>
                         <a
-                          href={reference.doi}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
+                          href={resolveDoiUrl(reference.doi)}
+                          onClick={(e) => openLinkInWebPanel(resolveDoiUrl(reference.doi), e)}
                         >
                           {reference.doi}
                         </a>

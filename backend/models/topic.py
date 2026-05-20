@@ -10,7 +10,7 @@ def get_topics_by_project(project_id):
                pr.doi AS ref_doi, pr.authors AS ref_authors, pr.abstract AS ref_abstract,
                pr.notes AS ref_notes, pr.citation_count AS ref_citation_count,
                pr.publication_year AS ref_publication_year, pr.created_at AS ref_created_at,
-               pr.bibtex AS ref_bibtex
+               pr.bibtex AS ref_bibtex, pr.pdf_path AS ref_pdf_path
         FROM topics t
         LEFT JOIN paper_references pr ON pr.topic_id = t.id
         WHERE t.project_id = ?
@@ -49,6 +49,7 @@ def get_topics_by_project(project_id):
                 'publication_year': row['ref_publication_year'],
                 'created_at': row['ref_created_at'],
                 'bibtex': row['ref_bibtex'],
+                'pdf_path': row['ref_pdf_path'],
             })
 
     return list(topics_map.values())

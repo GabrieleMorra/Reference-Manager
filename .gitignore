@@ -9,6 +9,9 @@ dist-electron/
 *.db
 database/*.db
 
+# User-uploaded reference PDFs
+database/pdfs/
+
 # Python
 __pycache__/
 *.pyc
