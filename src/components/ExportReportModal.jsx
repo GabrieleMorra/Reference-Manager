@@ -7,6 +7,9 @@ function ExportReportModal({ projectId, projectTitle, onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [format, setFormat] = useState('markdown');
+  const [includeAbstract, setIncludeAbstract] = useState(true);
+  const [includeNotes, setIncludeNotes] = useState(true);
+  const [includeConnections, setIncludeConnections] = useState(true);
 
   useEffect(() => {
     loadReport();
@@ -42,12 +45,13 @@ function ExportReportModal({ projectId, projectTitle, onClose }) {
         if (ref.citation_count) meta.push(`Citations: ${ref.citation_count}`);
         if (ref.doi) meta.push(`DOI: ${ref.doi}`);
         if (meta.length) lines.push(meta.join(' | '));
-        if (ref.notes) lines.push(`\n> ${ref.notes.replace(/\n/g, '\n> ')}`);
+        if (includeAbstract && ref.abstract) lines.push(`\n**Abstract:** ${ref.abstract}`);
+        if (includeNotes && ref.notes) lines.push(`\n> ${ref.notes.replace(/\n/g, '\n> ')}`);
         lines.push('');
       });
     });
 
-    if (report.connections.length > 0) {
+    if (includeConnections && report.connections.length > 0) {
       lines.push(`## Connections\n`);
       report.connections.forEach((conn) => {
         const label = conn.description ? ` - ${conn.description}` : '';
@@ -74,12 +78,13 @@ function ExportReportModal({ projectId, projectTitle, onClose }) {
         if (ref.publication_year) lines.push(`     Year: ${ref.publication_year}`);
         if (ref.citation_count) lines.push(`     Citations: ${ref.citation_count}`);
         if (ref.doi) lines.push(`     DOI: ${ref.doi}`);
-        if (ref.notes) lines.push(`     Notes: ${ref.notes}`);
+        if (includeAbstract && ref.abstract) lines.push(`     Abstract: ${ref.abstract}`);
+        if (includeNotes && ref.notes) lines.push(`     Notes: ${ref.notes}`);
         lines.push('');
       });
     });
 
-    if (report.connections.length > 0) {
+    if (includeConnections && report.connections.length > 0) {
       lines.push('Connections');
       lines.push('-'.repeat(11));
       lines.push('');
@@ -161,6 +166,20 @@ function ExportReportModal({ projectId, projectTitle, onClose }) {
             >
               Plain Text
             </button>
+          </div>
+          <div className="export-include-options">
+            <label className="export-checkbox">
+              <input type="checkbox" checked={includeAbstract} onChange={(e) => setIncludeAbstract(e.target.checked)} />
+              Abstract
+            </label>
+            <label className="export-checkbox">
+              <input type="checkbox" checked={includeNotes} onChange={(e) => setIncludeNotes(e.target.checked)} />
+              Notes
+            </label>
+            <label className="export-checkbox">
+              <input type="checkbox" checked={includeConnections} onChange={(e) => setIncludeConnections(e.target.checked)} />
+              Connections
+            </label>
           </div>
           <div className="export-report-actions">
             <button className="export-action-btn copy" onClick={handleCopyToClipboard} disabled={!report}>

@@ -270,6 +270,7 @@ def export_report(project_id):
                     'doi': ref.get('doi', ''),
                     'publication_year': ref.get('publication_year'),
                     'citation_count': ref.get('citation_count', 0),
+                    'abstract': ref.get('abstract', ''),
                     'notes': ref.get('notes', ''),
                 })
             report_topics.append({
